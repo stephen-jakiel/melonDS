@@ -802,6 +802,15 @@ void MainWindow::closeEvent(QCloseEvent* event)
     for (auto child : childwins)
         child->close();
 
+    // Qt won't quit the app while any top-level window is still open. The
+    // Lua console (if a script is/was running) is one such window, parented
+    // to us but not a MainWindow, so the loop above doesn't find it -- left
+    // open, it silently keeps the whole process alive after this window
+    // closes (the app "closes" visually but the process never exits).
+    auto luaConsoles = findChildren<LuaConsoleDialog *>();
+    for (auto console : luaConsoles)
+        console->close();
+
     if (!emuInstance) return;
 
     QByteArray geom = saveGeometry();

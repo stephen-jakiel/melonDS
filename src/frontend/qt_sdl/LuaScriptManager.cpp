@@ -147,7 +147,13 @@ void LuaScriptManager::stop()
     running.store(false);
 
     // Matches BizHawk's behavior: a script's forms don't outlive it.
+    // destroyAll() only schedules deletion (QWidget::deleteLater()), so
+    // flush it immediately rather than leaving those windows to linger
+    // open until the event loop happens to get back around to it --
+    // same "a still-open top-level window blocks app quit" concern as
+    // the Lua console (see MainWindow::closeEvent).
     formsManager->destroyAll();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
 }
 
 LuaScriptManager* LuaScriptManager::self(lua_State* L)
