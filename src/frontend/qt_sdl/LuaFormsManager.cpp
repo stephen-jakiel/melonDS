@@ -47,30 +47,7 @@ protected:
     {
         QPainter painter(this);
         painter.fillRect(rect(), Qt::black);
-
-        for (const auto& cmd : owner->drawCommandsFor(handle))
-        {
-            switch (cmd.kind)
-            {
-            case LuaDrawCommand::Text:
-                painter.setPen(cmd.color);
-                painter.drawText(QRectF(cmd.x1, cmd.y1, 1000, 20), Qt::AlignLeft | Qt::AlignTop, cmd.text);
-                break;
-            case LuaDrawCommand::Rect:
-                painter.setPen(cmd.color);
-                painter.setBrush(cmd.fillColor.alpha() > 0 ? QBrush(cmd.fillColor) : Qt::NoBrush);
-                painter.drawRect(QRectF(cmd.x1, cmd.y1, cmd.x2, cmd.y2));
-                break;
-            case LuaDrawCommand::Line:
-                painter.setPen(cmd.color);
-                painter.drawLine(QPointF(cmd.x1, cmd.y1), QPointF(cmd.x2, cmd.y2));
-                break;
-            case LuaDrawCommand::Pixel:
-                painter.setPen(cmd.color);
-                painter.drawPoint(QPointF(cmd.x1, cmd.y1));
-                break;
-            }
-        }
+        paintLuaDrawCommands(painter, owner->drawCommandsFor(handle));
     }
 
 private:
@@ -406,6 +383,24 @@ void LuaFormsManager::refresh(int handle)
 
 void LuaFormsManager::addDrawCommand(int handle, const LuaDrawCommand& cmd)
 {
+    pictureBoxCommands[handle].push_back(cmd);
+}
+
+void LuaFormsManager::clearPictureBox(int handle, const QColor& color)
+{
+    QWidget* w = widgets.value(handle);
+    if (!w) return;
+
+    pictureBoxCommands[handle].clear();
+
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Rect;
+    cmd.x1 = 0;
+    cmd.y1 = 0;
+    cmd.x2 = w->width();
+    cmd.y2 = w->height();
+    cmd.color = color;
+    cmd.fillColor = color;
     pictureBoxCommands[handle].push_back(cmd);
 }
 

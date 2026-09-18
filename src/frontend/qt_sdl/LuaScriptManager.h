@@ -22,6 +22,8 @@
 #include <QColor>
 #include <QMutex>
 #include <QObject>
+#include <QPoint>
+#include <QRect>
 #include <QString>
 #include <QStringList>
 #include <atomic>
@@ -44,12 +46,29 @@ class LuaFormsManager;
 // supported.
 struct LuaDrawCommand
 {
-    enum Kind { Text, Rect, Line, Pixel } kind;
-    int x1, y1, x2, y2;
+    enum Kind { Text, Rect, Line, Pixel, Ellipse, Polygon, Image } kind;
+    int x1, y1, x2, y2; // Image: x1,y1=dest pos, x2,y2=dest size (0=natural)
     QColor color;
     QColor fillColor;
-    QString text;
+    QString text;  // Text: the string. Image: the file path.
+    std::vector<QPointF> points; // Polygon only
+    QRect srcRect; // Image only, source crop region; invalid = whole image
 };
+
+class QPainter;
+class QImage;
+
+// Renders a batch of LuaDrawCommands via the given QPainter, in whatever
+// pixel space the caller's painter transform already maps to. Shared
+// between the gui.* screen overlay (Screen.cpp) and forms.* pictureBox
+// widgets (LuaFormsManager.cpp) so both stay visually consistent.
+void paintLuaDrawCommands(QPainter& painter, const std::vector<LuaDrawCommand>& commands);
+
+// Shared by gui.drawImage/drawImageRegion and forms.drawImage, and by
+// paintLuaDrawCommands() itself. Cache is keyed by path and shared
+// process-wide (not per-script) -- fine, since scripts don't mutate loaded
+// images, just redraw them each frame.
+QImage getCachedLuaImage(const QString& path);
 
 // Runs a single Lua script against this emulator instance, on its own
 // thread. Scripts are expected to drive their own main loop by calling
@@ -130,7 +149,26 @@ private:
     static int l_forms_openfile(lua_State* L);
     static int l_forms_drawtext(lua_State* L);
     static int l_forms_drawrectangle(lua_State* L);
+    static int l_forms_drawellipse(lua_State* L);
+    static int l_forms_drawimage(lua_State* L);
+    static int l_forms_clear(lua_State* L);
     static int l_forms_refresh(lua_State* L);
+
+    static int l_gui_clearimagecache(lua_State* L);
+    static int l_gui_drawimage(lua_State* L);
+    static int l_gui_drawimageregion(lua_State* L);
+    static int l_gui_drawpolygon(lua_State* L);
+
+    static int l_client_bufferwidth(lua_State* L);
+    static int l_client_closerom(lua_State* L);
+    static int l_client_openrom(lua_State* L);
+    static int l_client_pause(lua_State* L);
+
+    // Real BizHawk global API calls (unlike the many other event.* uses
+    // across the tracker's source, which are a local variable shadowing
+    // this global within specific functions -- checked each one).
+    static int l_event_onexit(lua_State* L);
+    static int l_event_onconsoleclose(lua_State* L);
 
     static int l_client_setgameextrapadding(lua_State* L);
     static int l_client_setsoundon(lua_State* L);
@@ -189,6 +227,7 @@ private:
 
     std::unique_ptr<LuaFormsManager> formsManager;
     QString scriptDir;
+    std::vector<int> exitCallbackRefs; // event.onexit/onconsoleclose
 };
 
 #endif // LUASCRIPTMANAGER_H

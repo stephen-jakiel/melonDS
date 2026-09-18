@@ -93,6 +93,9 @@ public:
     QString openFile(const QString& initialDir, const QString& filter, const QString& title);
     void refresh(int handle);
     void addDrawCommand(int handle, const LuaDrawCommand& cmd);
+    // Clears a pictureBox's prior draw commands and fills it with color
+    // (matches forms.clear's semantics: wipe the canvas to a flat color).
+    void clearPictureBox(int handle, const QColor& color);
     // Called from LuaPictureBox::paintEvent, always on the UI thread (same
     // as addDrawCommand, via runOnUI), so no locking needed between them.
     std::vector<LuaDrawCommand> drawCommandsFor(int handle) const;

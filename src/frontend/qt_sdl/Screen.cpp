@@ -850,30 +850,8 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
                 painter.resetTransform();
                 double sx = (double)width() / (256.0 + emuInstance->luaPadLeft + emuInstance->luaPadRight);
                 double sy = (double)height() / (384.0 + emuInstance->luaPadTop + emuInstance->luaPadBottom);
-                for (const auto& cmd : commands)
-                {
-                    switch (cmd.kind)
-                    {
-                    case LuaDrawCommand::Text:
-                        painter.setPen(cmd.color);
-                        painter.drawText(QRectF(cmd.x1 * sx, cmd.y1 * sy, 1000, 20),
-                                          Qt::AlignLeft | Qt::AlignTop, cmd.text);
-                        break;
-                    case LuaDrawCommand::Rect:
-                        painter.setPen(cmd.color);
-                        painter.setBrush(cmd.fillColor.alpha() > 0 ? QBrush(cmd.fillColor) : Qt::NoBrush);
-                        painter.drawRect(QRectF(cmd.x1 * sx, cmd.y1 * sy, cmd.x2 * sx, cmd.y2 * sy));
-                        break;
-                    case LuaDrawCommand::Line:
-                        painter.setPen(cmd.color);
-                        painter.drawLine(QPointF(cmd.x1 * sx, cmd.y1 * sy), QPointF(cmd.x2 * sx, cmd.y2 * sy));
-                        break;
-                    case LuaDrawCommand::Pixel:
-                        painter.setPen(cmd.color);
-                        painter.drawPoint(QPointF(cmd.x1 * sx, cmd.y1 * sy));
-                        break;
-                    }
-                }
+                painter.scale(sx, sy);
+                paintLuaDrawCommands(painter, commands);
             }
         }
     }

@@ -21,7 +21,11 @@
 #include <QCursor>
 #include <QDir>
 #include <QFileInfo>
+#include <QImage>
+#include <QMap>
 #include <QMutexLocker>
+#include <QPainter>
+#include <QPolygonF>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -155,6 +159,19 @@ void LuaScriptManager::threadMain(QString scriptPath)
         logf("Lua error: %s", err ? err : "(unknown error)");
     }
 
+    // event.onexit/onconsoleclose handlers, run now while L is still valid.
+    for (int ref : exitCallbackRefs)
+    {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+        if (lua_pcall(L, 0, 0, 0) != LUA_OK)
+        {
+            const char* err = lua_tostring(L, -1);
+            logf("Lua error in exit handler: %s", err ? err : "(unknown error)");
+            lua_pop(L, 1);
+        }
+    }
+    exitCallbackRefs.clear();
+
     lua_close(L);
     L = nullptr;
 
@@ -190,6 +207,10 @@ void LuaScriptManager::registerAPI()
         {"drawRectangle", l_gui_drawrectangle},
         {"drawLine", l_gui_drawline},
         {"drawPixel", l_gui_drawpixel},
+        {"drawPolygon", l_gui_drawpolygon},
+        {"drawImage", l_gui_drawimage},
+        {"drawImageRegion", l_gui_drawimageregion},
+        {"clearImageCache", l_gui_clearimagecache},
         {nullptr, nullptr}
     };
     luaL_newlib(L, guiFuncs);
@@ -217,6 +238,9 @@ void LuaScriptManager::registerAPI()
         {"openfile", l_forms_openfile},
         {"drawText", l_forms_drawtext},
         {"drawRectangle", l_forms_drawrectangle},
+        {"drawEllipse", l_forms_drawellipse},
+        {"drawImage", l_forms_drawimage},
+        {"clear", l_forms_clear},
         {"refresh", l_forms_refresh},
         {nullptr, nullptr}
     };
@@ -227,6 +251,7 @@ void LuaScriptManager::registerAPI()
         {"SetGameExtraPadding", l_client_setgameextrapadding},
         {"SetSoundOn", l_client_setsoundon},
         {"GetSoundOn", l_client_getsoundon},
+        {"pause", l_client_pause},
         {"unpause", l_client_unpause},
         {"getversion", l_client_getversion},
         {"get_approx_framerate", l_client_get_approx_framerate},
@@ -234,11 +259,22 @@ void LuaScriptManager::registerAPI()
         {"ypos", l_client_ypos},
         {"screenwidth", l_client_screenwidth},
         {"screenheight", l_client_screenheight},
+        {"bufferwidth", l_client_bufferwidth},
         {"saveram", l_client_saveram},
+        {"closerom", l_client_closerom},
+        {"openrom", l_client_openrom},
         {nullptr, nullptr}
     };
     luaL_newlib(L, clientFuncs);
     lua_setglobal(L, "client");
+
+    static const luaL_Reg eventFuncs[] = {
+        {"onexit", l_event_onexit},
+        {"onconsoleclose", l_event_onconsoleclose},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, eventFuncs);
+    lua_setglobal(L, "event");
 
     static const luaL_Reg savestateFuncs[] = {
         {"save", l_savestate_save},
@@ -264,8 +300,17 @@ void LuaScriptManager::registerAPI()
 
     static const luaL_Reg commFuncs[] = {
         {"httpTest", l_comm_stub_bool},
+        {"httpGet", l_comm_stub_table},
+        {"httpPost", l_comm_stub_table},
+        {"httpSetGetUrl", l_comm_stub_noop},
+        {"httpSetPostUrl", l_comm_stub_noop},
+        {"httpSetTimeout", l_comm_stub_noop},
         {"socketServerSetTimeout", l_comm_stub_noop},
+        {"socketServerSetIp", l_comm_stub_noop},
+        {"socketServerSetPort", l_comm_stub_noop},
         {"socketServerSend", l_comm_stub_noop},
+        {"socketServerResponse", l_comm_stub_table},
+        {"socketServerSuccessful", l_comm_stub_bool},
         {"socketServerIsConnected", l_comm_stub_bool},
         {"socketServerGetInfo", l_comm_stub_table},
         {nullptr, nullptr}
@@ -1056,4 +1101,243 @@ int LuaScriptManager::l_comm_stub_table(lua_State* L)
 int LuaScriptManager::l_comm_stub_noop(lua_State* L)
 {
     return 0;
+}
+
+int LuaScriptManager::l_gui_drawpolygon(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Polygon;
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_Integer n = lua_rawlen(L, 1);
+    for (lua_Integer i = 1; i <= n; i++)
+    {
+        lua_rawgeti(L, 1, (int)i);
+        if (lua_istable(L, -1))
+        {
+            lua_rawgeti(L, -1, 1);
+            double x = lua_tonumber(L, -1);
+            lua_pop(L, 1);
+            lua_rawgeti(L, -1, 2);
+            double y = lua_tonumber(L, -1);
+            lua_pop(L, 1);
+            cmd.points.push_back(QPointF(x, y));
+        }
+        lua_pop(L, 1);
+    }
+    cmd.color = lua_gettop(L) >= 2 ? checkColor(L, 2) : QColor(255, 255, 255, 255);
+    cmd.fillColor = checkColor(L, 3);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawimage(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Image;
+    cmd.text = QString::fromUtf8(luaL_checkstring(L, 1));
+    cmd.x1 = (int)luaL_checkinteger(L, 2);
+    cmd.y1 = (int)luaL_checkinteger(L, 3);
+    cmd.x2 = (int)luaL_optinteger(L, 4, 0);
+    cmd.y2 = (int)luaL_optinteger(L, 5, 0);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawimageregion(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Image;
+    cmd.text = QString::fromUtf8(luaL_checkstring(L, 1));
+    int srcX = (int)luaL_checkinteger(L, 2);
+    int srcY = (int)luaL_checkinteger(L, 3);
+    int srcW = (int)luaL_checkinteger(L, 4);
+    int srcH = (int)luaL_checkinteger(L, 5);
+    cmd.srcRect = QRect(srcX, srcY, srcW, srcH);
+    cmd.x1 = (int)luaL_checkinteger(L, 6);
+    cmd.y1 = (int)luaL_checkinteger(L, 7);
+    cmd.x2 = (int)luaL_optinteger(L, 8, srcW);
+    cmd.y2 = (int)luaL_optinteger(L, 9, srcH);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_drawellipse(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Ellipse;
+    cmd.x1 = (int)luaL_checkinteger(L, 2);
+    cmd.y1 = (int)luaL_checkinteger(L, 3);
+    cmd.x2 = (int)luaL_checkinteger(L, 4);
+    cmd.y2 = (int)luaL_checkinteger(L, 5);
+    cmd.color = checkColor(L, 6);
+    cmd.fillColor = checkColor(L, 7);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->addDrawCommand(handle, cmd); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_drawimage(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Image;
+    cmd.text = QString::fromUtf8(luaL_checkstring(L, 2));
+    cmd.x1 = (int)luaL_checkinteger(L, 3);
+    cmd.y1 = (int)luaL_checkinteger(L, 4);
+    cmd.x2 = (int)luaL_optinteger(L, 5, 0);
+    cmd.y2 = (int)luaL_optinteger(L, 6, 0);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->addDrawCommand(handle, cmd); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_clear(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    QColor color = checkColor(L, 2);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->clearPictureBox(handle, color); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_client_bufferwidth(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    lua_pushinteger(L, 256 + mgr->emuInstance->luaPadLeft + mgr->emuInstance->luaPadRight);
+    return 1;
+}
+
+int LuaScriptManager::l_client_closerom(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    mgr->emuInstance->getEmuThread()->ejectCart(false);
+    return 0;
+}
+
+int LuaScriptManager::l_client_openrom(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    QString path = QString::fromUtf8(luaL_checkstring(L, 1));
+    QString err;
+    mgr->emuInstance->getEmuThread()->bootROM({path}, err);
+    return 0;
+}
+
+int LuaScriptManager::l_client_pause(lua_State* L)
+{
+    // Deliberately a no-op -- same reasoning as l_client_unpause: this
+    // fork's script model always drives frame progression itself via
+    // emu.frameadvance(), so honoring the emulator's own pause/unpause
+    // state from a script would let frames free-run uncontrolled between
+    // frameadvance() calls.
+    return 0;
+}
+
+int LuaScriptManager::l_event_onexit(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int ref = refFunctionArg(L, 1);
+    if (ref != 0)
+        mgr->exitCallbackRefs.push_back(ref);
+    return 0;
+}
+
+int LuaScriptManager::l_event_onconsoleclose(lua_State* L)
+{
+    // Treated the same as onexit here: there's no separate "console window"
+    // concept distinct from the script itself in this fork (the
+    // LuaConsoleDialog is just a debug log viewer scripts don't otherwise
+    // interact with) -- both fire when the script stops.
+    return l_event_onexit(L);
+}
+
+// --- shared draw-command rendering / image cache ------------------------
+
+static QMap<QString, QImage> g_imageCache;
+
+QImage getCachedLuaImage(const QString& path)
+{
+    auto it = g_imageCache.constFind(path);
+    if (it != g_imageCache.constEnd())
+        return it.value();
+
+    QImage img(path);
+    g_imageCache.insert(path, img);
+    return img;
+}
+
+int LuaScriptManager::l_gui_clearimagecache(lua_State* L)
+{
+    g_imageCache.clear();
+    return 0;
+}
+
+void paintLuaDrawCommands(QPainter& painter, const std::vector<LuaDrawCommand>& commands)
+{
+    for (const auto& cmd : commands)
+    {
+        switch (cmd.kind)
+        {
+        case LuaDrawCommand::Text:
+            painter.setPen(cmd.color);
+            painter.drawText(QRectF(cmd.x1, cmd.y1, 1000, 20), Qt::AlignLeft | Qt::AlignTop, cmd.text);
+            break;
+        case LuaDrawCommand::Rect:
+            painter.setPen(cmd.color);
+            painter.setBrush(cmd.fillColor.alpha() > 0 ? QBrush(cmd.fillColor) : Qt::NoBrush);
+            painter.drawRect(QRectF(cmd.x1, cmd.y1, cmd.x2, cmd.y2));
+            break;
+        case LuaDrawCommand::Line:
+            painter.setPen(cmd.color);
+            painter.drawLine(QPointF(cmd.x1, cmd.y1), QPointF(cmd.x2, cmd.y2));
+            break;
+        case LuaDrawCommand::Pixel:
+            painter.setPen(cmd.color);
+            painter.drawPoint(QPointF(cmd.x1, cmd.y1));
+            break;
+        case LuaDrawCommand::Ellipse:
+            painter.setPen(cmd.color);
+            painter.setBrush(cmd.fillColor.alpha() > 0 ? QBrush(cmd.fillColor) : Qt::NoBrush);
+            painter.drawEllipse(QRectF(cmd.x1, cmd.y1, cmd.x2, cmd.y2));
+            break;
+        case LuaDrawCommand::Polygon:
+        {
+            painter.setPen(cmd.color);
+            painter.setBrush(cmd.fillColor.alpha() > 0 ? QBrush(cmd.fillColor) : Qt::NoBrush);
+            QPolygonF poly;
+            for (const auto& pt : cmd.points)
+                poly << pt;
+            painter.drawPolygon(poly);
+            break;
+        }
+        case LuaDrawCommand::Image:
+        {
+            QImage img = getCachedLuaImage(cmd.text);
+            if (img.isNull())
+                break;
+            QRect src = cmd.srcRect.isValid() ? cmd.srcRect : img.rect();
+            int dw = cmd.x2 > 0 ? cmd.x2 : src.width();
+            int dh = cmd.y2 > 0 ? cmd.y2 : src.height();
+            painter.drawImage(QRect(cmd.x1, cmd.y1, dw, dh), img, src);
+            break;
+        }
+        }
+    }
 }
