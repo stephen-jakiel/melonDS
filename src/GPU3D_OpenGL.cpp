@@ -124,8 +124,8 @@ bool GLRenderer3D::Init()
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_STENCIL_TEST);
 
-    glDepthRange(0, 1);
-    glClearDepth(1.0);
+    glDepthRangef(0.0f, 1.0f);
+    glClearDepthf(1.0f);
 
     if (!OpenGL::CompileVertexFragmentProgram(ClearShaderPlain,
             k3DClearVS, k3DClearFS,
@@ -1382,7 +1382,7 @@ void GLRenderer3D::RenderFrame()
     ShaderConfig.uFogShift = GPU3D.RenderFogShift;
 
     glBindBuffer(GL_UNIFORM_BUFFER, ShaderConfigUBO);
-    void* unibuf = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+    void* unibuf = glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(ShaderConfig), GL_MAP_WRITE_BIT);
     if (unibuf) memcpy(unibuf, &ShaderConfig, sizeof(ShaderConfig));
     glUnmapBuffer(GL_UNIFORM_BUFFER);
 

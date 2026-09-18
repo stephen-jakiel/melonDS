@@ -341,8 +341,11 @@ bool CompileVertexFragmentProgram(GLuint& result,
     {
         glBindAttribLocation(result, target.Location, target.Name);
     }
-    // Not available under GLES (e.g. Android) — shaders there specify frag
-    // data location explicitly instead, so skip this when unavailable.
+    // Not declared at all under GLES (e.g. Android) — shaders there specify
+    // frag data location explicitly instead. Elsewhere, still guard with a
+    // null check: glad leaves the pointer null for any GL context that
+    // doesn't expose it.
+#if !defined(__ANDROID__)
     if (glBindFragDataLocation)
     {
         for (const AttributeTarget& target : fragmentOutAttrs)
@@ -350,6 +353,7 @@ bool CompileVertexFragmentProgram(GLuint& result,
             glBindFragDataLocation(result, target.Location, target.Name);
         }
     }
+#endif
 
     linkingSucess = LinkProgram(result, shaders, 2);
 

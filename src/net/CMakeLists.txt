@@ -28,6 +28,11 @@ endif()
 if (USE_VCPKG)
     find_package(unofficial-enet CONFIG REQUIRED)
     target_link_libraries(net-utils PRIVATE unofficial::enet::enet)
+elseif (ANDROID)
+    # pkg-config isn't available in the NDK cross-compilation environment.
+    # The Android frontend already provides an `enet` target, built from its
+    # own vendored submodule (see android/app/CMakeLists.txt).
+    target_link_libraries(net-utils PUBLIC enet)
 else()
     pkg_check_modules(ENet REQUIRED IMPORTED_TARGET libenet)
     fix_interface_includes(PkgConfig::ENet)

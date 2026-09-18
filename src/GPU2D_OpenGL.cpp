@@ -249,12 +249,12 @@ bool GLRenderer2D::Init()
     glGenTextures(1, &PalTex_BG);
     glBindTexture(GL_TEXTURE_2D, PalTex_BG);
     glDefaultTexParams(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB5_A1, 256, 1+(4*16), 0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB5_A1, 256, 1+(4*16), 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, nullptr);
 
     glGenTextures(1, &PalTex_OBJ);
     glBindTexture(GL_TEXTURE_2D, PalTex_OBJ);
     glDefaultTexParams(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB5_A1, 256, 1+16, 0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB5_A1, 256, 1+16, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, nullptr);
 
     // generate texture to hold pre-rendered BG layers
 
@@ -285,7 +285,7 @@ bool GLRenderer2D::Init()
 
             glBindFramebuffer(GL_FRAMEBUFFER, AllBGLayerFB[l]);
             glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, AllBGLayerTex[l], 0);
-            glDrawBuffer(GL_COLOR_ATTACHMENT0);
+            { const GLenum buf = GL_COLOR_ATTACHMENT0; glDrawBuffers(1, &buf); }
 
             l++;
         }
@@ -301,7 +301,7 @@ bool GLRenderer2D::Init()
     glGenFramebuffers(1, &SpriteFB);
     glBindFramebuffer(GL_FRAMEBUFFER, SpriteFB);
     glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, SpriteTex, 0);
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    { const GLenum buf = GL_COLOR_ATTACHMENT0; glDrawBuffers(1, &buf); }
 
     // generate texture to hold final (upscaled) sprites
 
@@ -480,7 +480,7 @@ void GLRenderer2D::SetScaleFactor(int scale)
 
     glBindFramebuffer(GL_FRAMEBUFFER, OutputFB);
     glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, OutputTex, 0);
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    { const GLenum buf = GL_COLOR_ATTACHMENT0; glDrawBuffers(1, &buf); }
 }
 
 
@@ -733,7 +733,7 @@ void GLRenderer2D::UpdateAndRender(int line)
         }
 
         glBindTexture(GL_TEXTURE_2D, PalTex_BG);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1+(4*16), GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1+(4*16), GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1,
                         TempPalBuffer);
     }
 
@@ -788,7 +788,7 @@ void GLRenderer2D::UpdateAndRender(int line)
 
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, PalTex_OBJ);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1+16, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, TempPalBuffer);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1+16, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, TempPalBuffer);
 
         PrerenderSprites();
 
@@ -1654,7 +1654,7 @@ void GLRenderer2D::DoRenderSprites(int line)
     // transparent pixels too, and priority is only checked against opaque pixels
 
     glClearColor(0, 0, 0, 0);
-    glClearDepth(1);
+    glClearDepthf(1.0f);
     glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_TRUE);
