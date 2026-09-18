@@ -1,0 +1,9 @@
+[submodule "android/app/src/main/cpp/oboe"]
+	path = android/app/src/main/cpp/oboe
+	url = https://github.com/google/oboe.git
+[submodule "android/app/src/main/cpp/faad2"]
+	path = android/app/src/main/cpp/faad2
+	url = https://github.com/knik0/faad2.git
+[submodule "android/app/src/main/cpp/enet"]
+	path = android/app/src/main/cpp/enet
+	url = https://github.com/lsalzman/enet.git

@@ -9,12 +9,15 @@ set(BUILD_QT_SDL OFF)
 set(ENABLE_GDBSTUB OFF)
 
 set(ANDROID-CPP src/main/cpp)
-set(CORE-LIB ../melonDS-android-lib)
+# Points at this repo's root, where the melonDS core now lives directly
+# (merged in via android-support branch) rather than a separate
+# melonDS-android-lib submodule checkout.
+set(CORE-LIB ../..)
 set(OBOE ${ANDROID-CPP}/oboe)
 set(FAAD2 ${ANDROID-CPP}/faad2)
 set(RCHEEVOS ${ANDROID-CPP}/rcheevos)
 
-add_subdirectory(${CORE-LIB} ./melonDS-android-lib)
+add_subdirectory(${CORE-LIB} ./melonDS-core)
 add_subdirectory(${OBOE} ./oboe)
 add_subdirectory(${FAAD2} ./faad2)
 add_subdirectory(${RCHEEVOS} ./rcheevos)
