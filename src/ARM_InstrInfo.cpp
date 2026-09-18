@@ -317,6 +317,8 @@ const u32 T_SVC = T_BranchAlways | T_WriteR14 | tk(tk_SVC);
 
 Info Decode(bool thumb, u32 num, u32 instr, bool literaloptimizations)
 {
+    (void)literaloptimizations;
+
     const u8 FlagsReadPerCond[7] = {
         flag_Z,
         flag_C,
@@ -386,8 +388,11 @@ Info Decode(bool thumb, u32 num, u32 instr, bool literaloptimizations)
         {
             if (res.Kind == tk_LDR_PCREL)
             {
-                if (!literaloptimizations)
-                    res.SrcRegs |= 1 << 15;
+                // Always allocate R15 as a source register here, even when literal
+                // optimizations are enabled, so the register allocator behaves
+                // correctly if the JIT falls back to a real load for an invalid
+                // literal. Fixes crashes on some games hitting that fallback path.
+                res.SrcRegs |= 1 << 15;
                 res.SpecialKind = special_LoadLiteral;
             }
             else
