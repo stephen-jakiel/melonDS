@@ -321,6 +321,7 @@ void EmuThread::run()
                 emuInstance->firmwareSave->CheckFlush();
 
             emuInstance->drawScreen();
+            frameAdvanceSemaphore.release();
 
 #ifdef MELONCAP
             MelonCap::Update();

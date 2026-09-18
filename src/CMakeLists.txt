@@ -182,6 +182,9 @@ add_subdirectory(teakra EXCLUDE_FROM_ALL)
 target_compile_options(teakra PRIVATE "$<$<CONFIG:DEBUG>:-Og>")
 target_link_libraries(core PRIVATE teakra)
 
+# Lua scripting support (used by the frontends, not core itself)
+add_subdirectory(lua)
+
 if (NOT MSVC)
     # MSVC has its own compiler flag syntax; if we ever support it,
     # be sure to add equivalent flags here.

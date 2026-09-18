@@ -132,6 +132,7 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
     net.RegisterInstance(instanceID);
 
     emuThread = new EmuThread(this);
+    luaScript = std::make_unique<LuaScriptManager>(this);
 
     numWindows = 0;
     mainWindow = nullptr;
@@ -157,6 +158,10 @@ EmuInstance::~EmuInstance()
 {
     deleting = true;
     deleteAllWindows();
+
+    // Must happen before emuThread is torn down below: a running script's
+    // stop() touches emuThread's frameAdvanceSemaphore.
+    luaScript = nullptr;
 
     emuThread->emuExit();
     emuThread->wait();

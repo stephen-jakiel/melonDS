@@ -140,6 +140,11 @@ public:
     QWaitCondition glBorrowCond;
     QMutex glBorrowMutex;
 
+    // Released once per completed frame (regardless of running vs. single
+    // frame-step mode), so a Lua script driving emu.frameadvance() can block
+    // until the frame it just requested has actually finished executing.
+    QSemaphore frameAdvanceSemaphore;
+
 signals:
     void windowUpdate();
     void windowTitleChange(QString title);

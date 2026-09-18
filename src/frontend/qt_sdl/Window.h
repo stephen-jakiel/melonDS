@@ -130,6 +130,8 @@ private slots:
     void onROMInfo();
     void onRAMInfo();
     void onOpenTitleManager();
+    void onRunLuaScript();
+    void onStopLuaScript();
     void onMPNewInstance();
     void onLANStartHost();
     void onLANStartClient();
@@ -254,6 +256,8 @@ public:
     QAction* actROMInfo;
     QAction* actRAMInfo;
     QAction* actTitleManager;
+    QAction* actRunLuaScript;
+    QAction* actStopLuaScript;
     QAction* actMPNewInstance;
     QAction* actLANStartHost;
     QAction* actLANStartClient;

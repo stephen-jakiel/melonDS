@@ -44,6 +44,7 @@
 
 #include "main.h"
 #include "CheatsDialog.h"
+#include "LuaConsoleDialog.h"
 #include "DateTimeDialog.h"
 #include "EmuSettingsDialog.h"
 #include "InputConfig/InputConfigDialog.h"
@@ -407,6 +408,14 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
                 actTitleManager = menu->addAction("Manage DSi titles");
                 connect(actTitleManager, &QAction::triggered, this, &MainWindow::onOpenTitleManager);
+
+                menu->addSeparator();
+                actRunLuaScript = menu->addAction("Run Lua script...");
+                connect(actRunLuaScript, &QAction::triggered, this, &MainWindow::onRunLuaScript);
+
+                actStopLuaScript = menu->addAction("Stop Lua script");
+                actStopLuaScript->setEnabled(false);
+                connect(actStopLuaScript, &QAction::triggered, this, &MainWindow::onStopLuaScript);
             }
 
             {
@@ -1734,6 +1743,31 @@ void MainWindow::onRAMInfo()
 void MainWindow::onOpenTitleManager()
 {
     TitleManagerDialog* dlg = TitleManagerDialog::openDlg(this);
+}
+
+void MainWindow::onRunLuaScript()
+{
+    QString path = QFileDialog::getOpenFileName(
+        this,
+        "Run Lua script",
+        globalCfg.GetQString("LastROMFolder"),
+        "Lua scripts (*.lua)");
+    if (path.isEmpty()) return;
+
+    if (emuInstance->luaScript->isRunning())
+        emuInstance->luaScript->stop();
+
+    auto* console = new LuaConsoleDialog(emuInstance->luaScript.get(), this);
+    console->show();
+
+    emuInstance->luaScript->start(path);
+    actStopLuaScript->setEnabled(true);
+}
+
+void MainWindow::onStopLuaScript()
+{
+    emuInstance->luaScript->stop();
+    actStopLuaScript->setEnabled(false);
 }
 
 void MainWindow::onMPNewInstance()

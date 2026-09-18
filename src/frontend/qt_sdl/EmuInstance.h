@@ -25,6 +25,7 @@
 #include "main.h"
 #include "NDS.h"
 #include "EmuThread.h"
+#include "LuaScriptManager.h"
 #include "Window.h"
 #include "Config.h"
 #include "SaveManager.h"
@@ -296,6 +297,8 @@ public:
     std::unique_ptr<SaveManager> ndsSave;
     std::unique_ptr<SaveManager> gbaSave;
     std::unique_ptr<SaveManager> firmwareSave;
+
+    std::unique_ptr<LuaScriptManager> luaScript;
 
     bool doLimitFPS;
     double curFPS;
