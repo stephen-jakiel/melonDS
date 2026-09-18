@@ -422,6 +422,9 @@ int main(int argc, char** argv)
 
         if (options->fullscreen)
             win->toggleFullscreen();
+
+        if (options->luaScriptPath.has_value())
+            win->runLuaScript(*options->luaScriptPath);
     }
 
     int ret = melon.exec();

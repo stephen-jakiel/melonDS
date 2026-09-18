@@ -1754,6 +1754,11 @@ void MainWindow::onRunLuaScript()
         "Lua scripts (*.lua)");
     if (path.isEmpty()) return;
 
+    runLuaScript(path);
+}
+
+void MainWindow::runLuaScript(const QString& path)
+{
     if (emuInstance->luaScript->isRunning())
         emuInstance->luaScript->stop();
 

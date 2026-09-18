@@ -74,6 +74,8 @@ public:
     bool preloadROMs(QStringList file, QStringList gbafile, bool boot);
     QStringList splitArchivePath(const QString& filename, bool useMemberSyntax);
 
+    void runLuaScript(const QString& path);
+
     void onAppStateChanged(Qt::ApplicationState state);
 
     void onFocusIn();
