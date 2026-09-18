@@ -298,12 +298,14 @@ int main(int argc, char** argv)
     argv = __argv;
 
     // Check whether we are already attached to an output stream.
+    bool consoleAttached = false;
     HANDLE outputHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     if (!outputHandle || (outputHandle == INVALID_HANDLE_VALUE))
     {
         // If started from terminal, attach and output logs to it.
         if (AttachConsole(ATTACH_PARENT_PROCESS))
         {
+            consoleAttached = true;
             freopen("CONOUT$", "a", stdout);
             freopen("CONOUT$", "a", stderr);
         }
@@ -441,5 +443,20 @@ int main(int argc, char** argv)
     Config::Save();
 
     SDL_Quit();
+
+#if defined(_WIN32)
+    // Detach from the parent console we attached to above. Without this,
+    // exiting while still attached to PowerShell's console leaves its
+    // console host without a signal to redraw -- the process is gone, but
+    // the prompt doesn't reappear until something (e.g. pressing Enter)
+    // nudges it.
+    if (consoleAttached)
+    {
+        fclose(stdout);
+        fclose(stderr);
+        FreeConsole();
+    }
+#endif
+
     return ret;
 }
