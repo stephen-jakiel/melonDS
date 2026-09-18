@@ -105,6 +105,7 @@ signals:
     // calls print(), or when it errors out / finishes.
     void consoleOutput(QString text);
     void scriptStopped();
+    void consoleCleared();
 
 private:
     void threadMain(QString scriptPath);
@@ -169,6 +170,19 @@ private:
     // this global within specific functions -- checked each one).
     static int l_event_onexit(lua_State* L);
     static int l_event_onconsoleclose(lua_State* L);
+
+    static int l_console_clear(lua_State* L);
+    static int l_gameinfo_getromname(lua_State* L);
+    static int l_gameinfo_getromhash(lua_State* L);
+
+    // bit.*: Lua 5.4 has native bitwise operators, but BizHawk scripts
+    // (written against Lua 5.1, which lacked them) commonly still use this
+    // library-style API, so it's provided as a thin wrapper.
+    static int l_bit_band(lua_State* L);
+    static int l_bit_bor(lua_State* L);
+    static int l_bit_bxor(lua_State* L);
+    static int l_bit_lshift(lua_State* L);
+    static int l_bit_rshift(lua_State* L);
 
     static int l_client_setgameextrapadding(lua_State* L);
     static int l_client_setsoundon(lua_State* L);

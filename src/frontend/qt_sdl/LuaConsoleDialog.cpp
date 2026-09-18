@@ -37,6 +37,7 @@ LuaConsoleDialog::LuaConsoleDialog(LuaScriptManager* script, QWidget* parent) : 
 
     connect(script, &LuaScriptManager::consoleOutput, this, &LuaConsoleDialog::onConsoleOutput);
     connect(script, &LuaScriptManager::scriptStopped, this, &LuaConsoleDialog::onScriptStopped);
+    connect(script, &LuaScriptManager::consoleCleared, this, &LuaConsoleDialog::onConsoleCleared);
 }
 
 void LuaConsoleDialog::onConsoleOutput(QString text)
@@ -47,4 +48,9 @@ void LuaConsoleDialog::onConsoleOutput(QString text)
 void LuaConsoleDialog::onScriptStopped()
 {
     log->appendPlainText("[script stopped]");
+}
+
+void LuaConsoleDialog::onConsoleCleared()
+{
+    log->clear();
 }

@@ -43,6 +43,9 @@ extern "C"
 #include "EmuThread.h"
 #include "LuaFormsManager.h"
 #include "NDS.h"
+#include "NDSCart.h"
+#include "NDSCart/CartCommon.h"
+#include "sha1/sha1.hpp"
 
 using namespace melonDS;
 
@@ -275,6 +278,32 @@ void LuaScriptManager::registerAPI()
     };
     luaL_newlib(L, eventFuncs);
     lua_setglobal(L, "event");
+
+    static const luaL_Reg consoleFuncs[] = {
+        {"clear", l_console_clear},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, consoleFuncs);
+    lua_setglobal(L, "console");
+
+    static const luaL_Reg gameinfoFuncs[] = {
+        {"getromname", l_gameinfo_getromname},
+        {"getromhash", l_gameinfo_getromhash},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, gameinfoFuncs);
+    lua_setglobal(L, "gameinfo");
+
+    static const luaL_Reg bitFuncs[] = {
+        {"band", l_bit_band},
+        {"bor", l_bit_bor},
+        {"bxor", l_bit_bxor},
+        {"lshift", l_bit_lshift},
+        {"rshift", l_bit_rshift},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, bitFuncs);
+    lua_setglobal(L, "bit");
 
     static const luaL_Reg savestateFuncs[] = {
         {"save", l_savestate_save},
@@ -1266,6 +1295,101 @@ int LuaScriptManager::l_event_onconsoleclose(lua_State* L)
     // LuaConsoleDialog is just a debug log viewer scripts don't otherwise
     // interact with) -- both fire when the script stops.
     return l_event_onexit(L);
+}
+
+int LuaScriptManager::l_console_clear(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    emit mgr->consoleCleared();
+    return 0;
+}
+
+int LuaScriptManager::l_gameinfo_getromname(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    NDS* nds = mgr->emuInstance->getNDS();
+    auto* cart = nds ? nds->GetNDSCart() : nullptr;
+    if (!cart)
+    {
+        lua_pushstring(L, "Null");
+        return 1;
+    }
+
+    char buf[13] = {0};
+    memcpy(buf, cart->GetHeader().GameTitle, 12);
+    QString title = QString::fromLatin1(buf).trimmed();
+    lua_pushstring(L, title.isEmpty() ? "Null" : title.toUtf8().constData());
+    return 1;
+}
+
+int LuaScriptManager::l_gameinfo_getromhash(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    NDS* nds = mgr->emuInstance->getNDS();
+    auto* cart = nds ? nds->GetNDSCart() : nullptr;
+    if (!cart || !cart->GetROM())
+    {
+        lua_pushstring(L, "");
+        return 1;
+    }
+
+    SHA1_CTX ctx;
+    SHA1Init(&ctx);
+    SHA1Update(&ctx, cart->GetROM(), cart->GetROMLength());
+    unsigned char digest[20];
+    SHA1Final(digest, &ctx);
+
+    char hex[41];
+    for (int i = 0; i < 20; i++)
+        snprintf(hex + i * 2, 3, "%02x", digest[i]);
+    lua_pushstring(L, hex);
+    return 1;
+}
+
+int LuaScriptManager::l_bit_band(lua_State* L)
+{
+    int n = lua_gettop(L);
+    lua_Integer result = n >= 1 ? luaL_checkinteger(L, 1) : 0;
+    for (int i = 2; i <= n; i++)
+        result &= luaL_checkinteger(L, i);
+    lua_pushinteger(L, result);
+    return 1;
+}
+
+int LuaScriptManager::l_bit_bor(lua_State* L)
+{
+    int n = lua_gettop(L);
+    lua_Integer result = n >= 1 ? luaL_checkinteger(L, 1) : 0;
+    for (int i = 2; i <= n; i++)
+        result |= luaL_checkinteger(L, i);
+    lua_pushinteger(L, result);
+    return 1;
+}
+
+int LuaScriptManager::l_bit_bxor(lua_State* L)
+{
+    int n = lua_gettop(L);
+    lua_Integer result = n >= 1 ? luaL_checkinteger(L, 1) : 0;
+    for (int i = 2; i <= n; i++)
+        result ^= luaL_checkinteger(L, i);
+    lua_pushinteger(L, result);
+    return 1;
+}
+
+int LuaScriptManager::l_bit_lshift(lua_State* L)
+{
+    lua_Integer a = luaL_checkinteger(L, 1);
+    lua_Integer b = luaL_checkinteger(L, 2);
+    lua_pushinteger(L, a << b);
+    return 1;
+}
+
+int LuaScriptManager::l_bit_rshift(lua_State* L)
+{
+    lua_Integer a = luaL_checkinteger(L, 1);
+    lua_Integer b = luaL_checkinteger(L, 2);
+    lua_pushinteger(L, (lua_Integer)((uint64_t)a >> b));
+    return 1;
 }
 
 // --- shared draw-command rendering / image cache ------------------------

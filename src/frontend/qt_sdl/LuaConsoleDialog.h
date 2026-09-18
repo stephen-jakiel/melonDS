@@ -24,9 +24,9 @@
 class QPlainTextEdit;
 class LuaScriptManager;
 
-// A simple non-modal log window for Lua script print() output and errors.
-// Not the tracker's real UI (that's forms.*, not yet implemented) -- this is
-// primarily a debugging aid for testing scripts against memory.*/emu.*.
+// A simple non-modal log window for Lua script print() output, errors, and
+// console.clear() -- separate from the tracker's own forms.*-based UI
+// windows, this is just a debug log viewer.
 class LuaConsoleDialog : public QDialog
 {
     Q_OBJECT
@@ -37,6 +37,7 @@ public:
 private slots:
     void onConsoleOutput(QString text);
     void onScriptStopped();
+    void onConsoleCleared();
 
 private:
     QPlainTextEdit* log;
