@@ -19,9 +19,11 @@
 #include "LuaScriptManager.h"
 
 #include <QMutexLocker>
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 extern "C"
 {
@@ -103,12 +105,7 @@ LuaScriptManager* LuaScriptManager::self(lua_State* L)
 void LuaScriptManager::threadMain(QString scriptPath)
 {
     if (!emuInstance->getEmuThread()->emuIsActive())
-    {
-        logf("No game is running -- load a ROM or boot firmware before running a script.");
-        running.store(false);
-        emit scriptStopped();
-        return;
-    }
+        logf("No game running yet -- waiting for a ROM to be loaded or firmware booted...");
 
     L = luaL_newstate();
     luaL_openlibs(L);
@@ -293,7 +290,16 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
 
     EmuThread* thread = mgr->emuInstance->getEmuThread();
     if (!thread->emuIsActive())
-        return luaL_error(L, "no game is running");
+    {
+        // No game loaded yet (or the cart was ejected mid-script) -- wait
+        // rather than erroring out, so a script started before loading a
+        // ROM (a very natural thing to do) just idles until one is loaded,
+        // matching how BizHawk/mGBA scripts can always frame-advance.
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        if (mgr->stopRequested.load())
+            return luaL_error(L, "script stopped");
+        return 0;
+    }
 
     thread->emuFrameStep();
     thread->frameAdvanceSemaphore.acquire();
