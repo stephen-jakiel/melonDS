@@ -1206,10 +1206,19 @@ int LuaScriptManager::l_input_getmouse(lua_State* L)
         };
     });
 
+    // BizHawk's own NDS core reports mouse Y in a range of roughly [-384,
+    // 384] centered on the middle of the combined dual-screen view, not
+    // plain 0..384 -- confirmed from this tracker's own source
+    // (Input.lua: `y = (mouse["Y"] + 384) / 2`, applied to every reported
+    // position before use anywhere else). Replicate that convention here
+    // rather than sending the plain logical Y, so the tracker's own
+    // unwinding of it produces the right final coordinate.
+    double rawY = state.pos.y() * 2.0 - 384.0;
+
     lua_newtable(L);
     lua_pushinteger(L, (lua_Integer)llround(state.pos.x()));
     lua_setfield(L, -2, "X");
-    lua_pushinteger(L, (lua_Integer)llround(state.pos.y()));
+    lua_pushinteger(L, (lua_Integer)llround(rawY));
     lua_setfield(L, -2, "Y");
     lua_pushinteger(L, 0); // scroll wheel delta tracking not implemented
     lua_setfield(L, -2, "Wheel");
