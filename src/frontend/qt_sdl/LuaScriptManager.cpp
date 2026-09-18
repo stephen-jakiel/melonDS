@@ -18,6 +18,7 @@
 
 #include "LuaScriptManager.h"
 
+#include <QCursor>
 #include <QMutexLocker>
 #include <chrono>
 #include <cstdarg>
@@ -208,6 +209,56 @@ void LuaScriptManager::registerAPI()
     };
     luaL_newlib(L, formsFuncs);
     lua_setglobal(L, "forms");
+
+    static const luaL_Reg clientFuncs[] = {
+        {"SetGameExtraPadding", l_client_setgameextrapadding},
+        {"SetSoundOn", l_client_setsoundon},
+        {"GetSoundOn", l_client_getsoundon},
+        {"unpause", l_client_unpause},
+        {"getversion", l_client_getversion},
+        {"get_approx_framerate", l_client_get_approx_framerate},
+        {"xpos", l_client_xpos},
+        {"ypos", l_client_ypos},
+        {"screenwidth", l_client_screenwidth},
+        {"screenheight", l_client_screenheight},
+        {"saveram", l_client_saveram},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, clientFuncs);
+    lua_setglobal(L, "client");
+
+    static const luaL_Reg savestateFuncs[] = {
+        {"save", l_savestate_save},
+        {"load", l_savestate_load},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, savestateFuncs);
+    lua_setglobal(L, "savestate");
+
+    static const luaL_Reg joypadFuncs[] = {
+        {"get", l_joypad_get},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, joypadFuncs);
+    lua_setglobal(L, "joypad");
+
+    static const luaL_Reg inputFuncs[] = {
+        {"getmouse", l_input_getmouse},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, inputFuncs);
+    lua_setglobal(L, "input");
+
+    static const luaL_Reg commFuncs[] = {
+        {"httpTest", l_comm_stub_bool},
+        {"socketServerSetTimeout", l_comm_stub_noop},
+        {"socketServerSend", l_comm_stub_noop},
+        {"socketServerIsConnected", l_comm_stub_bool},
+        {"socketServerGetInfo", l_comm_stub_table},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, commFuncs);
+    lua_setglobal(L, "comm");
 }
 
 int LuaScriptManager::l_print(lua_State* L)
@@ -804,5 +855,192 @@ int LuaScriptManager::l_forms_refresh(lua_State* L)
 
     auto* fm = mgr->formsManager.get();
     fm->runOnUI([=]() { fm->refresh(handle); return 0; });
+    return 0;
+}
+
+// --- client.* / savestate.* / joypad.* / input.* / comm.* --------------
+
+int LuaScriptManager::l_client_setgameextrapadding(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int left = (int)luaL_checkinteger(L, 1);
+    int top = (int)luaL_checkinteger(L, 2);
+    int right = (int)luaL_checkinteger(L, 3);
+    int bottom = (int)luaL_checkinteger(L, 4);
+
+    EmuInstance* inst = mgr->emuInstance;
+    inst->luaPadLeft = left;
+    inst->luaPadTop = top;
+    inst->luaPadRight = right;
+    inst->luaPadBottom = bottom;
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { inst->getMainWindow()->updateScreenLayout(); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_client_setsoundon(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    bool on = lua_toboolean(L, 1);
+    mgr->emuInstance->setAudioMuted(!on);
+    return 0;
+}
+
+int LuaScriptManager::l_client_getsoundon(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    lua_pushboolean(L, !mgr->emuInstance->isAudioMuted());
+    return 1;
+}
+
+int LuaScriptManager::l_client_unpause(lua_State* L)
+{
+    // Deliberately a no-op: this fork's script model always drives frame
+    // progression itself via emu.frameadvance() (see that function), not
+    // via the emulator's own running/paused state -- letting a script flip
+    // that state would let the emu thread free-run uncontrolled frames
+    // between frameadvance() calls, desyncing the script from what's
+    // actually being displayed.
+    return 0;
+}
+
+int LuaScriptManager::l_client_getversion(lua_State* L)
+{
+    // The tracker only branches on this to detect the old BizHawk 2.8 (Lua
+    // 5.1) behavior; anything else selects its modern/Lua-5.4-era code
+    // path, which is what we want.
+    lua_pushstring(L, "2.9.1");
+    return 1;
+}
+
+int LuaScriptManager::l_client_get_approx_framerate(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    lua_pushnumber(L, mgr->emuInstance->curFPS);
+    return 1;
+}
+
+int LuaScriptManager::l_client_xpos(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    auto* fm = mgr->formsManager.get();
+    EmuInstance* inst = mgr->emuInstance;
+    int x = fm->runOnUI([=]() { return inst->getMainWindow()->x(); });
+    lua_pushinteger(L, x);
+    return 1;
+}
+
+int LuaScriptManager::l_client_ypos(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    auto* fm = mgr->formsManager.get();
+    EmuInstance* inst = mgr->emuInstance;
+    int y = fm->runOnUI([=]() { return inst->getMainWindow()->y(); });
+    lua_pushinteger(L, y);
+    return 1;
+}
+
+int LuaScriptManager::l_client_screenwidth(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    auto* fm = mgr->formsManager.get();
+    EmuInstance* inst = mgr->emuInstance;
+    // Approximated as the whole main window's width (menu bar etc.
+    // included), not just the game panel -- good enough for the tracker's
+    // actual use (centering popup dialogs), not pixel-exact vs. BizHawk.
+    int w = fm->runOnUI([=]() { return inst->getMainWindow()->width(); });
+    lua_pushinteger(L, w);
+    return 1;
+}
+
+int LuaScriptManager::l_client_screenheight(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    auto* fm = mgr->formsManager.get();
+    EmuInstance* inst = mgr->emuInstance;
+    int h = fm->runOnUI([=]() { return inst->getMainWindow()->height(); });
+    lua_pushinteger(L, h);
+    return 1;
+}
+
+int LuaScriptManager::l_client_saveram(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    if (mgr->emuInstance->ndsSave)
+        mgr->emuInstance->ndsSave->CheckFlush();
+    return 0;
+}
+
+int LuaScriptManager::l_savestate_save(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    QString path = QString::fromUtf8(luaL_checkstring(L, 1));
+    // EmuThread's save/load are already a thread-safe message-queue RPC
+    // (same mechanism as emuFrameStep()), so no runOnUI needed here.
+    mgr->emuInstance->getEmuThread()->saveState(path);
+    return 0;
+}
+
+int LuaScriptManager::l_savestate_load(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    QString path = QString::fromUtf8(luaL_checkstring(L, 1));
+    mgr->emuInstance->getEmuThread()->loadState(path);
+    return 0;
+}
+
+int LuaScriptManager::l_joypad_get(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    static const char* keyNames[12] = {"A", "B", "X", "Y", "Left", "Right", "Up", "Down", "L", "R", "Select", "Start"};
+    u32 mask = mgr->emuInstance->getInputMask();
+
+    lua_newtable(L);
+    for (int i = 0; i < 12; i++)
+    {
+        lua_pushboolean(L, !(mask & (1u << i))); // active-low: clear bit = pressed
+        lua_setfield(L, -2, keyNames[i]);
+    }
+    return 1;
+}
+
+int LuaScriptManager::l_input_getmouse(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    auto* fm = mgr->formsManager.get();
+    EmuInstance* inst = mgr->emuInstance;
+    QPoint pos = fm->runOnUI([=]() { return inst->getMainWindow()->mapFromGlobal(QCursor::pos()); });
+
+    lua_newtable(L);
+    lua_pushinteger(L, pos.x());
+    lua_setfield(L, -2, "X");
+    lua_pushinteger(L, pos.y());
+    lua_setfield(L, -2, "Y");
+    lua_pushinteger(L, 0); // scroll wheel tracking not implemented
+    lua_setfield(L, -2, "Wheel");
+    lua_pushboolean(L, false);
+    lua_setfield(L, -2, "Left");
+    lua_pushboolean(L, false);
+    lua_setfield(L, -2, "Middle");
+    lua_pushboolean(L, false);
+    lua_setfield(L, -2, "Right");
+    return 1;
+}
+
+int LuaScriptManager::l_comm_stub_bool(lua_State* L)
+{
+    lua_pushboolean(L, false);
+    return 1;
+}
+
+int LuaScriptManager::l_comm_stub_table(lua_State* L)
+{
+    lua_newtable(L);
+    return 1;
+}
+
+int LuaScriptManager::l_comm_stub_noop(lua_State* L)
+{
     return 0;
 }

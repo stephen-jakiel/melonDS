@@ -61,6 +61,10 @@ public:
 
     void toggleFullscreen();
 
+    // Re-applies screen sizing/layout -- used after client.SetGameExtraPadding()
+    // changes how much space the panel needs.
+    void updateScreenLayout() { emit screenLayoutChange(); }
+
     bool hasOpenGL() { return hasOGL; }
     GL::Context* getOGLContext();
     void initOpenGL();

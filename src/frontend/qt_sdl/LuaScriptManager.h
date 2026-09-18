@@ -132,6 +132,28 @@ private:
     static int l_forms_drawrectangle(lua_State* L);
     static int l_forms_refresh(lua_State* L);
 
+    static int l_client_setgameextrapadding(lua_State* L);
+    static int l_client_setsoundon(lua_State* L);
+    static int l_client_getsoundon(lua_State* L);
+    static int l_client_unpause(lua_State* L);
+    static int l_client_getversion(lua_State* L);
+    static int l_client_get_approx_framerate(lua_State* L);
+    static int l_client_xpos(lua_State* L);
+    static int l_client_ypos(lua_State* L);
+    static int l_client_screenwidth(lua_State* L);
+    static int l_client_screenheight(lua_State* L);
+    static int l_client_saveram(lua_State* L);
+    static int l_savestate_save(lua_State* L);
+    static int l_savestate_load(lua_State* L);
+    static int l_joypad_get(lua_State* L);
+    static int l_input_getmouse(lua_State* L);
+    // comm.* (Streamerbot/Crowd Control network integration): stubbed as
+    // harmless no-ops/empty results. That's an optional streaming feature
+    // this fork doesn't implement, not something the live tracker needs.
+    static int l_comm_stub_bool(lua_State* L);
+    static int l_comm_stub_table(lua_State* L);
+    static int l_comm_stub_noop(lua_State* L);
+
     // Parses a BizHawk-style packed 0xAARRGGBB color argument at the given
     // stack index. Absent/nil is treated the same as alpha 0 (invisible),
     // matching how the tracker itself uses 0x00000000 to mean "don't draw

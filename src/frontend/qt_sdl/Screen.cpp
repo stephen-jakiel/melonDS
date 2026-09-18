@@ -193,40 +193,50 @@ QSize ScreenPanel::screenGetMinSize(int factor = 1)
     int w = 256 * factor;
     int h = 192 * factor;
 
-    if (screenSizing == screenSizing_TopOnly
-        || screenSizing == screenSizing_BotOnly)
+    // Base (unpadded) size, computed exactly as before -- extracted into a
+    // lambda purely so client.SetGameExtraPadding() can add its own space
+    // once at the end below, rather than needing to touch every branch.
+    auto base = [&]() -> QSize
     {
-        return QSize(w, h);
-    }
+        if (screenSizing == screenSizing_TopOnly
+            || screenSizing == screenSizing_BotOnly)
+        {
+            return QSize(w, h);
+        }
 
-    if (screenLayout == screenLayout_Natural)
-    {
-        if (isHori)
-            return QSize(h+gap+h, w);
-        else
-            return QSize(w, h+gap+h);
-    }
-    else if (screenLayout == screenLayout_Vertical)
-    {
-        if (isHori)
-            return QSize(h, w+gap+w);
-        else
-            return QSize(w, h+gap+h);
-    }
-    else if (screenLayout == screenLayout_Horizontal)
-    {
-        if (isHori)
-            return QSize(h+gap+h, w);
-        else
-            return QSize(w+gap+w, h);
-    }
-    else // hybrid
-    {
-        if (isHori)
-            return QSize(h+gap+h, 3*w + (int)ceil((4*gap) / 3.0));
-        else
-            return QSize(3*w + (int)ceil((4*gap) / 3.0), h+gap+h);
-    }
+        if (screenLayout == screenLayout_Natural)
+        {
+            if (isHori)
+                return QSize(h+gap+h, w);
+            else
+                return QSize(w, h+gap+h);
+        }
+        else if (screenLayout == screenLayout_Vertical)
+        {
+            if (isHori)
+                return QSize(h, w+gap+w);
+            else
+                return QSize(w, h+gap+h);
+        }
+        else if (screenLayout == screenLayout_Horizontal)
+        {
+            if (isHori)
+                return QSize(h+gap+h, w);
+            else
+                return QSize(w+gap+w, h);
+        }
+        else // hybrid
+        {
+            if (isHori)
+                return QSize(h+gap+h, 3*w + (int)ceil((4*gap) / 3.0));
+            else
+                return QSize(3*w + (int)ceil((4*gap) / 3.0), h+gap+h);
+        }
+    }();
+
+    return QSize(
+        base.width() + emuInstance->luaPadLeft + emuInstance->luaPadRight,
+        base.height() + emuInstance->luaPadTop + emuInstance->luaPadBottom);
 }
 
 void ScreenPanel::onScreenLayoutChanged()
@@ -827,7 +837,9 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
         emuInstance->renderLock.unlock();
 
         // Lua gui.* overlay. Assumes the standard top-then-bottom screen
-        // layout scaled to fill the whole panel; doesn't yet account for
+        // layout scaled to fill the whole panel (plus any
+        // client.SetGameExtraPadding() space to the right/bottom, addressed
+        // by gui.* coordinates beyond 256/384); doesn't yet account for
         // rotated/swapped/custom layouts, and only applies to this
         // (software) rendering path, not the OpenGL one.
         if (emuInstance->luaScript->isRunning())
@@ -836,8 +848,8 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
             if (!commands.empty())
             {
                 painter.resetTransform();
-                double sx = (double)width() / 256.0;
-                double sy = (double)height() / 384.0;
+                double sx = (double)width() / (256.0 + emuInstance->luaPadLeft + emuInstance->luaPadRight);
+                double sy = (double)height() / (384.0 + emuInstance->luaPadTop + emuInstance->luaPadBottom);
                 for (const auto& cmd : commands)
                 {
                     switch (cmd.kind)

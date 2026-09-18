@@ -21,6 +21,8 @@
 
 #include <SDL2/SDL.h>
 
+#include <atomic>
+
 #include "Platform.h"
 #include "main.h"
 #include "NDS.h"
@@ -96,6 +98,10 @@ public:
     MainWindow* getMainWindow() { return mainWindow; }
     int getNumWindows() { return numWindows; }
     MainWindow* getWindow(int id) { return windowList[id]; }
+
+    bool isAudioMuted() { return audioMutedToggle; }
+    void setAudioMuted(bool muted) { if (muted != audioMutedToggle) toggleAudioMute(); }
+    melonDS::u32 getInputMask() { return inputMask; }
 
     void doOnAllWindows(std::function<void(MainWindow*)> func, int exclude = -1);
     void saveEnabledWindows();
@@ -299,6 +305,14 @@ public:
     std::unique_ptr<SaveManager> firmwareSave;
 
     std::unique_ptr<LuaScriptManager> luaScript;
+
+    // client.SetGameExtraPadding(): extra space around the game screen for
+    // Lua scripts to draw a sidebar/HUD into via gui.*. Only left=top=0,
+    // right>0 is exercised by real scripts we've tested against, so that's
+    // the only direction that's meaningfully supported -- see Screen.cpp.
+    // atomic: written from the script thread (at any point, not just
+    // between frames), read from the UI thread during paint/layout.
+    std::atomic<int> luaPadLeft{0}, luaPadTop{0}, luaPadRight{0}, luaPadBottom{0};
 
     bool doLimitFPS;
     double curFPS;
