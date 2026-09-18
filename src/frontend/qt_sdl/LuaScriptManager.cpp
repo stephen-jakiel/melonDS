@@ -509,9 +509,18 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
     // drew (via gui.*) since the *previous* frameadvance() -- i.e. what's
     // sitting in drawCommands right now. Publish it for paint to read, and
     // start collecting fresh for the next frame.
+    //
+    // Only overwrite displayCommands when something was actually drawn
+    // this iteration. Not every pass through a script's main loop
+    // necessarily calls gui.draw*() (e.g. a UI that only redraws when its
+    // state changes, relying -- like on real hardware/BizHawk -- on the
+    // overlay persisting otherwise); unconditionally publishing an empty
+    // batch on those frames made the overlay flicker in and out each time
+    // the script happened to skip a redraw.
     {
         QMutexLocker locker(&mgr->drawMutex);
-        mgr->displayCommands = std::move(mgr->drawCommands);
+        if (!mgr->drawCommands.empty())
+            mgr->displayCommands = std::move(mgr->drawCommands);
         mgr->drawCommands.clear();
     }
 
