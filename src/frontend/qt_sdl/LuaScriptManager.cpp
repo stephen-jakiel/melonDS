@@ -18,6 +18,7 @@
 
 #include "LuaScriptManager.h"
 
+#include <QMutexLocker>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -47,6 +48,12 @@ LuaScriptManager::LuaScriptManager(EmuInstance* inst) : emuInstance(inst)
 LuaScriptManager::~LuaScriptManager()
 {
     stop();
+}
+
+std::vector<LuaDrawCommand> LuaScriptManager::getDrawCommands()
+{
+    QMutexLocker locker(&drawMutex);
+    return drawCommands;
 }
 
 void LuaScriptManager::logf(const char* fmt, ...)
@@ -149,6 +156,16 @@ void LuaScriptManager::registerAPI()
     };
     luaL_newlib(L, emuFuncs);
     lua_setglobal(L, "emu");
+
+    static const luaL_Reg guiFuncs[] = {
+        {"drawText", l_gui_drawtext},
+        {"drawRectangle", l_gui_drawrectangle},
+        {"drawLine", l_gui_drawline},
+        {"drawPixel", l_gui_drawpixel},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, guiFuncs);
+    lua_setglobal(L, "gui");
 }
 
 int LuaScriptManager::l_print(lua_State* L)
@@ -266,6 +283,14 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
     if (mgr->stopRequested.load())
         return luaL_error(L, "script stopped");
 
+    // Whatever the script drew via gui.* since the last frameadvance() is
+    // about to be shown for the frame we're stepping into now; anything
+    // drawn after this point belongs to the *next* frame.
+    {
+        QMutexLocker locker(&mgr->drawMutex);
+        mgr->drawCommands.clear();
+    }
+
     EmuThread* thread = mgr->emuInstance->getEmuThread();
     thread->emuFrameStep();
     thread->frameAdvanceSemaphore.acquire();
@@ -282,4 +307,79 @@ int LuaScriptManager::l_emu_framecount(lua_State* L)
     LuaScriptManager* mgr = self(L);
     lua_pushinteger(L, (lua_Integer)mgr->frameCount);
     return 1;
+}
+
+QColor LuaScriptManager::checkColor(lua_State* L, int idx)
+{
+    if (lua_isnoneornil(L, idx))
+        return QColor(0, 0, 0, 0);
+
+    uint32_t argb = (uint32_t)luaL_checkinteger(L, idx);
+    return QColor(
+        (argb >> 16) & 0xFF,
+        (argb >> 8) & 0xFF,
+        argb & 0xFF,
+        (argb >> 24) & 0xFF);
+}
+
+int LuaScriptManager::l_gui_drawtext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Text;
+    cmd.x1 = (int)luaL_checkinteger(L, 1);
+    cmd.y1 = (int)luaL_checkinteger(L, 2);
+    cmd.text = QString::fromUtf8(luaL_checkstring(L, 3));
+    cmd.color = lua_gettop(L) >= 4 ? checkColor(L, 4) : QColor(255, 255, 255, 255);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawrectangle(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Rect;
+    cmd.x1 = (int)luaL_checkinteger(L, 1);
+    cmd.y1 = (int)luaL_checkinteger(L, 2);
+    cmd.x2 = (int)luaL_checkinteger(L, 3); // width
+    cmd.y2 = (int)luaL_checkinteger(L, 4); // height
+    cmd.color = checkColor(L, 5);
+    cmd.fillColor = checkColor(L, 6);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawline(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Line;
+    cmd.x1 = (int)luaL_checkinteger(L, 1);
+    cmd.y1 = (int)luaL_checkinteger(L, 2);
+    cmd.x2 = (int)luaL_checkinteger(L, 3);
+    cmd.y2 = (int)luaL_checkinteger(L, 4);
+    cmd.color = lua_gettop(L) >= 5 ? checkColor(L, 5) : QColor(255, 255, 255, 255);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawpixel(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Pixel;
+    cmd.x1 = (int)luaL_checkinteger(L, 1);
+    cmd.y1 = (int)luaL_checkinteger(L, 2);
+    cmd.color = lua_gettop(L) >= 3 ? checkColor(L, 3) : QColor(255, 255, 255, 255);
+
+    QMutexLocker locker(&mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
 }

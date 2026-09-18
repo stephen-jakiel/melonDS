@@ -31,6 +31,7 @@
 
 #include "main.h"
 #include "EmuInstance.h"
+#include "LuaScriptManager.h"
 
 #include "NDS.h"
 #include "GPU.h"
@@ -824,6 +825,45 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
             painter.drawImage(screenrc, screen[screenKind[i]]);
         }
         emuInstance->renderLock.unlock();
+
+        // Lua gui.* overlay. Assumes the standard top-then-bottom screen
+        // layout scaled to fill the whole panel; doesn't yet account for
+        // rotated/swapped/custom layouts, and only applies to this
+        // (software) rendering path, not the OpenGL one.
+        if (emuInstance->luaScript->isRunning())
+        {
+            auto commands = emuInstance->luaScript->getDrawCommands();
+            if (!commands.empty())
+            {
+                painter.resetTransform();
+                double sx = (double)width() / 256.0;
+                double sy = (double)height() / 384.0;
+                for (const auto& cmd : commands)
+                {
+                    switch (cmd.kind)
+                    {
+                    case LuaDrawCommand::Text:
+                        painter.setPen(cmd.color);
+                        painter.drawText(QRectF(cmd.x1 * sx, cmd.y1 * sy, 1000, 20),
+                                          Qt::AlignLeft | Qt::AlignTop, cmd.text);
+                        break;
+                    case LuaDrawCommand::Rect:
+                        painter.setPen(cmd.color);
+                        painter.setBrush(cmd.fillColor.alpha() > 0 ? QBrush(cmd.fillColor) : Qt::NoBrush);
+                        painter.drawRect(QRectF(cmd.x1 * sx, cmd.y1 * sy, cmd.x2 * sx, cmd.y2 * sy));
+                        break;
+                    case LuaDrawCommand::Line:
+                        painter.setPen(cmd.color);
+                        painter.drawLine(QPointF(cmd.x1 * sx, cmd.y1 * sy), QPointF(cmd.x2 * sx, cmd.y2 * sy));
+                        break;
+                    case LuaDrawCommand::Pixel:
+                        painter.setPen(cmd.color);
+                        painter.drawPoint(QPointF(cmd.x1 * sx, cmd.y1 * sy));
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     osdUpdate();

@@ -19,14 +19,34 @@
 #ifndef LUASCRIPTMANAGER_H
 #define LUASCRIPTMANAGER_H
 
+#include <QColor>
+#include <QMutex>
 #include <QObject>
 #include <QString>
 #include <atomic>
 #include <cstdint>
 #include <thread>
+#include <vector>
 
 struct lua_State;
 class EmuInstance;
+
+// A single gui.draw*() call recorded by the script thread, consumed by the
+// UI thread when painting the next frame. Coordinates are in NDS-native
+// pixel space (256 wide, with the top screen at y=[0,192) and the bottom
+// screen at y=[192,384), matching BizHawk's addressing convention) --
+// currently only rendered when using the software (non-OpenGL) renderer,
+// scaled to fill the screen panel assuming the standard top-then-bottom
+// layout. Custom/rotated layouts and the OpenGL renderer are not yet
+// supported.
+struct LuaDrawCommand
+{
+    enum Kind { Text, Rect, Line, Pixel } kind;
+    int x1, y1, x2, y2;
+    QColor color;
+    QColor fillColor;
+    QString text;
+};
 
 // Runs a single Lua script against this emulator instance, on its own
 // thread. Scripts are expected to drive their own main loop by calling
@@ -54,6 +74,10 @@ public:
     // running.
     void stop();
 
+    // Thread-safe: called from the UI thread during paint. Returns a copy
+    // of whatever the script has drawn since the last frameadvance().
+    std::vector<LuaDrawCommand> getDrawCommands();
+
 signals:
     // Emitted (queued, safe to connect to UI slots) whenever the script
     // calls print(), or when it errors out / finishes.
@@ -77,6 +101,16 @@ private:
     static int l_memory_write_u32_le(lua_State* L);
     static int l_emu_frameadvance(lua_State* L);
     static int l_emu_framecount(lua_State* L);
+    static int l_gui_drawtext(lua_State* L);
+    static int l_gui_drawrectangle(lua_State* L);
+    static int l_gui_drawline(lua_State* L);
+    static int l_gui_drawpixel(lua_State* L);
+
+    // Parses a BizHawk-style packed 0xAARRGGBB color argument at the given
+    // stack index. Absent/nil is treated the same as alpha 0 (invisible),
+    // matching how the tracker itself uses 0x00000000 to mean "don't draw
+    // this part" (e.g. no outline on a filled rectangle).
+    static QColor checkColor(lua_State* L, int idx);
 
     EmuInstance* emuInstance;
     lua_State* L = nullptr;
@@ -84,6 +118,9 @@ private:
     std::atomic<bool> running {false};
     std::atomic<bool> stopRequested {false};
     uint64_t frameCount = 0;
+
+    QMutex drawMutex;
+    std::vector<LuaDrawCommand> drawCommands;
 };
 
 #endif // LUASCRIPTMANAGER_H
