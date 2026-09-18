@@ -18,6 +18,7 @@
 
 #include "LuaScriptManager.h"
 
+#include <QCoreApplication>
 #include <QCursor>
 #include <QDir>
 #include <QGuiApplication>
@@ -128,6 +129,20 @@ void LuaScriptManager::stop()
     // frame that will never come because the emulator itself isn't running,
     // nudge it forward so the stop request actually gets seen.
     emuInstance->getEmuThread()->frameAdvanceSemaphore.release();
+
+    // stop() always runs on the UI thread (called from Window.cpp or
+    // EmuInstance's destructor, e.g. when the user closes the main window).
+    // The script thread may right now be blocked inside a forms.*/input.*
+    // call's runOnUI() -- a Qt::BlockingQueuedConnection that only
+    // completes once *this* thread's event loop processes it. A plain
+    // scriptThread.join() here would block this thread without ever
+    // pumping that event loop, deadlocking forever against a script that's
+    // waiting on us. Poll instead, pumping events in the meantime so any
+    // pending runOnUI() call can actually complete and let the script
+    // thread keep making progress toward seeing stopRequested.
+    while (running.load())
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+
     scriptThread.join();
     running.store(false);
 
