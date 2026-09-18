@@ -27,6 +27,7 @@
 #include <QPainter>
 #include <QPolygonF>
 #include <chrono>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -53,6 +54,25 @@ using namespace melonDS;
 // registry, so our static C-function bindings (Lua's API only takes plain
 // function pointers, no captureable state) can get back to it.
 static const char* kSelfRegistryKey = "melonDS.LuaScriptManager";
+
+// Used in place of luaL_checkinteger/luaL_optinteger throughout this file.
+// Lua 5.4 distinguishes integer and float subtypes, and any expression
+// involving `/` (or other float-producing arithmetic) -- extremely common
+// for script authors computing coordinates, e.g. `x + width/2` -- yields a
+// float even when the result is a whole number. luaL_checkinteger rejects
+// that outright ("number has no integer representation"); rounding instead
+// accepts it while still behaving identically for genuine integers.
+static lua_Integer checkIntArg(lua_State* L, int idx)
+{
+    return (lua_Integer)llround(luaL_checknumber(L, idx));
+}
+
+static lua_Integer optIntArg(lua_State* L, int idx, lua_Integer def)
+{
+    if (lua_isnoneornil(L, idx))
+        return def;
+    return (lua_Integer)llround(luaL_checknumber(L, idx));
+}
 
 LuaScriptManager::LuaScriptManager(EmuInstance* inst) : emuInstance(inst)
 {
@@ -389,7 +409,7 @@ int LuaScriptManager::l_memory_usememorydomain(lua_State* L)
 int LuaScriptManager::l_memory_read_u8(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    u32 addr = (u32)luaL_checkinteger(L, 1);
+    u32 addr = (u32)checkIntArg(L, 1);
     NDS* nds = mgr->emuInstance->getNDS();
     lua_pushinteger(L, nds->MainRAM[addr & nds->MainRAMMask]);
     return 1;
@@ -398,7 +418,7 @@ int LuaScriptManager::l_memory_read_u8(lua_State* L)
 int LuaScriptManager::l_memory_read_u16_le(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    u32 addr = (u32)luaL_checkinteger(L, 1);
+    u32 addr = (u32)checkIntArg(L, 1);
     NDS* nds = mgr->emuInstance->getNDS();
     u32 a = addr & nds->MainRAMMask;
     u16 val = nds->MainRAM[a] | (nds->MainRAM[(a + 1) & nds->MainRAMMask] << 8);
@@ -409,7 +429,7 @@ int LuaScriptManager::l_memory_read_u16_le(lua_State* L)
 int LuaScriptManager::l_memory_read_u32_le(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    u32 addr = (u32)luaL_checkinteger(L, 1);
+    u32 addr = (u32)checkIntArg(L, 1);
     NDS* nds = mgr->emuInstance->getNDS();
     u32 a = addr & nds->MainRAMMask;
     u32 val = nds->MainRAM[a]
@@ -423,8 +443,8 @@ int LuaScriptManager::l_memory_read_u32_le(lua_State* L)
 int LuaScriptManager::l_memory_write_u8(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    u32 addr = (u32)luaL_checkinteger(L, 1);
-    u8 val = (u8)luaL_checkinteger(L, 2);
+    u32 addr = (u32)checkIntArg(L, 1);
+    u8 val = (u8)checkIntArg(L, 2);
     NDS* nds = mgr->emuInstance->getNDS();
     nds->MainRAM[addr & nds->MainRAMMask] = val;
     return 0;
@@ -433,8 +453,8 @@ int LuaScriptManager::l_memory_write_u8(lua_State* L)
 int LuaScriptManager::l_memory_write_u16_le(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    u32 addr = (u32)luaL_checkinteger(L, 1);
-    u16 val = (u16)luaL_checkinteger(L, 2);
+    u32 addr = (u32)checkIntArg(L, 1);
+    u16 val = (u16)checkIntArg(L, 2);
     NDS* nds = mgr->emuInstance->getNDS();
     u32 a = addr & nds->MainRAMMask;
     nds->MainRAM[a] = val & 0xFF;
@@ -445,8 +465,8 @@ int LuaScriptManager::l_memory_write_u16_le(lua_State* L)
 int LuaScriptManager::l_memory_write_u32_le(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    u32 addr = (u32)luaL_checkinteger(L, 1);
-    u32 val = (u32)luaL_checkinteger(L, 2);
+    u32 addr = (u32)checkIntArg(L, 1);
+    u32 val = (u32)checkIntArg(L, 2);
     NDS* nds = mgr->emuInstance->getNDS();
     u32 a = addr & nds->MainRAMMask;
     nds->MainRAM[a] = val & 0xFF;
@@ -513,7 +533,11 @@ QColor LuaScriptManager::checkColor(lua_State* L, int idx)
     if (lua_isnoneornil(L, idx))
         return QColor(0, 0, 0, 0);
 
-    uint32_t argb = (uint32_t)luaL_checkinteger(L, idx);
+    // luaL_checknumber (not checkinteger): some callers compute colors via
+    // float arithmetic (e.g. darkening one channel), producing a Lua float
+    // that Lua 5.4's strict luaL_checkinteger would reject outright even
+    // though it's a perfectly good color value once rounded.
+    uint32_t argb = (uint32_t)(int64_t)llround(luaL_checknumber(L, idx));
     return QColor(
         (argb >> 16) & 0xFF,
         (argb >> 8) & 0xFF,
@@ -526,8 +550,8 @@ int LuaScriptManager::l_gui_drawtext(lua_State* L)
     LuaScriptManager* mgr = self(L);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Text;
-    cmd.x1 = (int)luaL_checkinteger(L, 1);
-    cmd.y1 = (int)luaL_checkinteger(L, 2);
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
     cmd.text = QString::fromUtf8(luaL_checkstring(L, 3));
     cmd.color = lua_gettop(L) >= 4 ? checkColor(L, 4) : QColor(255, 255, 255, 255);
 
@@ -541,10 +565,10 @@ int LuaScriptManager::l_gui_drawrectangle(lua_State* L)
     LuaScriptManager* mgr = self(L);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Rect;
-    cmd.x1 = (int)luaL_checkinteger(L, 1);
-    cmd.y1 = (int)luaL_checkinteger(L, 2);
-    cmd.x2 = (int)luaL_checkinteger(L, 3); // width
-    cmd.y2 = (int)luaL_checkinteger(L, 4); // height
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.x2 = (int)checkIntArg(L, 3); // width
+    cmd.y2 = (int)checkIntArg(L, 4); // height
     cmd.color = checkColor(L, 5);
     cmd.fillColor = checkColor(L, 6);
 
@@ -558,10 +582,10 @@ int LuaScriptManager::l_gui_drawline(lua_State* L)
     LuaScriptManager* mgr = self(L);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Line;
-    cmd.x1 = (int)luaL_checkinteger(L, 1);
-    cmd.y1 = (int)luaL_checkinteger(L, 2);
-    cmd.x2 = (int)luaL_checkinteger(L, 3);
-    cmd.y2 = (int)luaL_checkinteger(L, 4);
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.x2 = (int)checkIntArg(L, 3);
+    cmd.y2 = (int)checkIntArg(L, 4);
     cmd.color = lua_gettop(L) >= 5 ? checkColor(L, 5) : QColor(255, 255, 255, 255);
 
     QMutexLocker locker(&mgr->drawMutex);
@@ -574,8 +598,8 @@ int LuaScriptManager::l_gui_drawpixel(lua_State* L)
     LuaScriptManager* mgr = self(L);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Pixel;
-    cmd.x1 = (int)luaL_checkinteger(L, 1);
-    cmd.y1 = (int)luaL_checkinteger(L, 2);
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
     cmd.color = lua_gettop(L) >= 3 ? checkColor(L, 3) : QColor(255, 255, 255, 255);
 
     QMutexLocker locker(&mgr->drawMutex);
@@ -649,8 +673,8 @@ void LuaScriptManager::dispatchFormsCallbacks()
 int LuaScriptManager::l_forms_newform(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int w = (int)luaL_checkinteger(L, 1);
-    int h = (int)luaL_checkinteger(L, 2);
+    int w = (int)checkIntArg(L, 1);
+    int h = (int)checkIntArg(L, 2);
     QString title = QString::fromUtf8(luaL_optstring(L, 3, "Script Window"));
     int onCloseRef = refFunctionArg(L, 4);
 
@@ -663,13 +687,13 @@ int LuaScriptManager::l_forms_newform(lua_State* L)
 int LuaScriptManager::l_forms_button(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int form = (int)luaL_checkinteger(L, 1);
+    int form = (int)checkIntArg(L, 1);
     QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
     int onClickRef = refFunctionArg(L, 3);
-    int x = (int)luaL_optinteger(L, 4, 0);
-    int y = (int)luaL_optinteger(L, 5, 0);
-    int w = (int)luaL_optinteger(L, 6, 75);
-    int h = (int)luaL_optinteger(L, 7, 23);
+    int x = (int)optIntArg(L, 4, 0);
+    int y = (int)optIntArg(L, 5, 0);
+    int w = (int)optIntArg(L, 6, 75);
+    int h = (int)optIntArg(L, 7, 23);
 
     auto* fm = mgr->formsManager.get();
     int handle = fm->runOnUI([=]() { return fm->addButton(form, caption, onClickRef, x, y, w, h); });
@@ -680,12 +704,12 @@ int LuaScriptManager::l_forms_button(lua_State* L)
 int LuaScriptManager::l_forms_label(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int form = (int)luaL_checkinteger(L, 1);
+    int form = (int)checkIntArg(L, 1);
     QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
-    int x = (int)luaL_optinteger(L, 3, 0);
-    int y = (int)luaL_optinteger(L, 4, 0);
-    int w = (int)luaL_optinteger(L, 5, 0);
-    int h = (int)luaL_optinteger(L, 6, 0);
+    int x = (int)optIntArg(L, 3, 0);
+    int y = (int)optIntArg(L, 4, 0);
+    int w = (int)optIntArg(L, 5, 0);
+    int h = (int)optIntArg(L, 6, 0);
 
     auto* fm = mgr->formsManager.get();
     int handle = fm->runOnUI([=]() { return fm->addLabel(form, caption, x, y, w, h); });
@@ -696,10 +720,10 @@ int LuaScriptManager::l_forms_label(lua_State* L)
 int LuaScriptManager::l_forms_checkbox(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int form = (int)luaL_checkinteger(L, 1);
+    int form = (int)checkIntArg(L, 1);
     QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
-    int x = (int)luaL_optinteger(L, 3, 0);
-    int y = (int)luaL_optinteger(L, 4, 0);
+    int x = (int)optIntArg(L, 3, 0);
+    int y = (int)optIntArg(L, 4, 0);
 
     auto* fm = mgr->formsManager.get();
     int handle = fm->runOnUI([=]() { return fm->addCheckbox(form, caption, x, y); });
@@ -710,14 +734,14 @@ int LuaScriptManager::l_forms_checkbox(lua_State* L)
 int LuaScriptManager::l_forms_textbox(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int form = (int)luaL_checkinteger(L, 1);
+    int form = (int)checkIntArg(L, 1);
     QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
-    int w = (int)luaL_optinteger(L, 3, 100);
-    int h = (int)luaL_optinteger(L, 4, 20);
+    int w = (int)optIntArg(L, 3, 100);
+    int h = (int)optIntArg(L, 4, 20);
     // arg 5 ("type", e.g. "HEX"/"NUMBER" input filtering) intentionally
     // ignored -- just a plain text field, no input validation.
-    int x = (int)luaL_optinteger(L, 6, 0);
-    int y = (int)luaL_optinteger(L, 7, 0);
+    int x = (int)optIntArg(L, 6, 0);
+    int y = (int)optIntArg(L, 7, 0);
     bool multiline = lua_gettop(L) >= 8 && lua_toboolean(L, 8);
 
     auto* fm = mgr->formsManager.get();
@@ -729,12 +753,12 @@ int LuaScriptManager::l_forms_textbox(lua_State* L)
 int LuaScriptManager::l_forms_dropdown(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int form = (int)luaL_checkinteger(L, 1);
+    int form = (int)checkIntArg(L, 1);
     QStringList items = checkStringList(L, 2);
-    int x = (int)luaL_optinteger(L, 3, 0);
-    int y = (int)luaL_optinteger(L, 4, 0);
-    int w = (int)luaL_optinteger(L, 5, 100);
-    int h = (int)luaL_optinteger(L, 6, 20);
+    int x = (int)optIntArg(L, 3, 0);
+    int y = (int)optIntArg(L, 4, 0);
+    int w = (int)optIntArg(L, 5, 100);
+    int h = (int)optIntArg(L, 6, 20);
 
     auto* fm = mgr->formsManager.get();
     int handle = fm->runOnUI([=]() { return fm->addDropdown(form, items, x, y, w, h); });
@@ -745,7 +769,7 @@ int LuaScriptManager::l_forms_dropdown(lua_State* L)
 int LuaScriptManager::l_forms_setdropdownitems(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     QStringList items = checkStringList(L, 2);
 
     auto* fm = mgr->formsManager.get();
@@ -756,11 +780,11 @@ int LuaScriptManager::l_forms_setdropdownitems(lua_State* L)
 int LuaScriptManager::l_forms_picturebox(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int form = (int)luaL_checkinteger(L, 1);
-    int x = (int)luaL_checkinteger(L, 2);
-    int y = (int)luaL_checkinteger(L, 3);
-    int w = (int)luaL_checkinteger(L, 4);
-    int h = (int)luaL_checkinteger(L, 5);
+    int form = (int)checkIntArg(L, 1);
+    int x = (int)checkIntArg(L, 2);
+    int y = (int)checkIntArg(L, 3);
+    int w = (int)checkIntArg(L, 4);
+    int h = (int)checkIntArg(L, 5);
 
     auto* fm = mgr->formsManager.get();
     int handle = fm->runOnUI([=]() { return fm->addPictureBox(form, x, y, w, h); });
@@ -771,7 +795,7 @@ int LuaScriptManager::l_forms_picturebox(lua_State* L)
 int LuaScriptManager::l_forms_setproperty(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     QString prop = QString::fromUtf8(luaL_checkstring(L, 2));
 
     QString value;
@@ -793,9 +817,9 @@ int LuaScriptManager::l_forms_setproperty(lua_State* L)
 int LuaScriptManager::l_forms_setlocation(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
-    int x = (int)luaL_checkinteger(L, 2);
-    int y = (int)luaL_checkinteger(L, 3);
+    int handle = (int)checkIntArg(L, 1);
+    int x = (int)checkIntArg(L, 2);
+    int y = (int)checkIntArg(L, 3);
 
     auto* fm = mgr->formsManager.get();
     fm->runOnUI([=]() { fm->setLocation(handle, x, y); return 0; });
@@ -805,7 +829,7 @@ int LuaScriptManager::l_forms_setlocation(lua_State* L)
 int LuaScriptManager::l_forms_settext(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     QString text = QString::fromUtf8(luaL_checkstring(L, 2));
 
     auto* fm = mgr->formsManager.get();
@@ -816,7 +840,7 @@ int LuaScriptManager::l_forms_settext(lua_State* L)
 int LuaScriptManager::l_forms_gettext(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
 
     auto* fm = mgr->formsManager.get();
     QString text = fm->runOnUI([=]() { return fm->getText(handle); });
@@ -827,7 +851,7 @@ int LuaScriptManager::l_forms_gettext(lua_State* L)
 int LuaScriptManager::l_forms_ischecked(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
 
     auto* fm = mgr->formsManager.get();
     bool checked = fm->runOnUI([=]() { return fm->isChecked(handle); });
@@ -838,7 +862,7 @@ int LuaScriptManager::l_forms_ischecked(lua_State* L)
 int LuaScriptManager::l_forms_destroy(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
 
     auto* fm = mgr->formsManager.get();
     fm->runOnUI([=]() { fm->destroyHandle(handle); return 0; });
@@ -856,7 +880,7 @@ int LuaScriptManager::l_forms_destroyall(lua_State* L)
 int LuaScriptManager::l_forms_addclick(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     int ref = refFunctionArg(L, 2);
     if (ref == 0)
         return 0;
@@ -869,7 +893,7 @@ int LuaScriptManager::l_forms_addclick(lua_State* L)
 int LuaScriptManager::l_forms_getmousex(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
 
     auto* fm = mgr->formsManager.get();
     int x = fm->runOnUI([=]() { return fm->getMouseX(handle); });
@@ -880,7 +904,7 @@ int LuaScriptManager::l_forms_getmousex(lua_State* L)
 int LuaScriptManager::l_forms_getmousey(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
 
     auto* fm = mgr->formsManager.get();
     int y = fm->runOnUI([=]() { return fm->getMouseY(handle); });
@@ -904,11 +928,11 @@ int LuaScriptManager::l_forms_openfile(lua_State* L)
 int LuaScriptManager::l_forms_drawtext(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Text;
-    cmd.x1 = (int)luaL_checkinteger(L, 2);
-    cmd.y1 = (int)luaL_checkinteger(L, 3);
+    cmd.x1 = (int)checkIntArg(L, 2);
+    cmd.y1 = (int)checkIntArg(L, 3);
     cmd.text = QString::fromUtf8(luaL_checkstring(L, 4));
     cmd.color = lua_gettop(L) >= 5 ? checkColor(L, 5) : QColor(255, 255, 255, 255);
 
@@ -920,13 +944,13 @@ int LuaScriptManager::l_forms_drawtext(lua_State* L)
 int LuaScriptManager::l_forms_drawrectangle(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Rect;
-    cmd.x1 = (int)luaL_checkinteger(L, 2);
-    cmd.y1 = (int)luaL_checkinteger(L, 3);
-    cmd.x2 = (int)luaL_checkinteger(L, 4);
-    cmd.y2 = (int)luaL_checkinteger(L, 5);
+    cmd.x1 = (int)checkIntArg(L, 2);
+    cmd.y1 = (int)checkIntArg(L, 3);
+    cmd.x2 = (int)checkIntArg(L, 4);
+    cmd.y2 = (int)checkIntArg(L, 5);
     cmd.color = checkColor(L, 6);
     cmd.fillColor = checkColor(L, 7);
 
@@ -938,7 +962,7 @@ int LuaScriptManager::l_forms_drawrectangle(lua_State* L)
 int LuaScriptManager::l_forms_refresh(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
 
     auto* fm = mgr->formsManager.get();
     fm->runOnUI([=]() { fm->refresh(handle); return 0; });
@@ -950,10 +974,10 @@ int LuaScriptManager::l_forms_refresh(lua_State* L)
 int LuaScriptManager::l_client_setgameextrapadding(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int left = (int)luaL_checkinteger(L, 1);
-    int top = (int)luaL_checkinteger(L, 2);
-    int right = (int)luaL_checkinteger(L, 3);
-    int bottom = (int)luaL_checkinteger(L, 4);
+    int left = (int)checkIntArg(L, 1);
+    int top = (int)checkIntArg(L, 2);
+    int right = (int)checkIntArg(L, 3);
+    int bottom = (int)checkIntArg(L, 4);
 
     EmuInstance* inst = mgr->emuInstance;
     inst->luaPadLeft = left;
@@ -1169,10 +1193,10 @@ int LuaScriptManager::l_gui_drawimage(lua_State* L)
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Image;
     cmd.text = QString::fromUtf8(luaL_checkstring(L, 1));
-    cmd.x1 = (int)luaL_checkinteger(L, 2);
-    cmd.y1 = (int)luaL_checkinteger(L, 3);
-    cmd.x2 = (int)luaL_optinteger(L, 4, 0);
-    cmd.y2 = (int)luaL_optinteger(L, 5, 0);
+    cmd.x1 = (int)checkIntArg(L, 2);
+    cmd.y1 = (int)checkIntArg(L, 3);
+    cmd.x2 = (int)optIntArg(L, 4, 0);
+    cmd.y2 = (int)optIntArg(L, 5, 0);
 
     QMutexLocker locker(&mgr->drawMutex);
     mgr->drawCommands.push_back(cmd);
@@ -1185,15 +1209,15 @@ int LuaScriptManager::l_gui_drawimageregion(lua_State* L)
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Image;
     cmd.text = QString::fromUtf8(luaL_checkstring(L, 1));
-    int srcX = (int)luaL_checkinteger(L, 2);
-    int srcY = (int)luaL_checkinteger(L, 3);
-    int srcW = (int)luaL_checkinteger(L, 4);
-    int srcH = (int)luaL_checkinteger(L, 5);
+    int srcX = (int)checkIntArg(L, 2);
+    int srcY = (int)checkIntArg(L, 3);
+    int srcW = (int)checkIntArg(L, 4);
+    int srcH = (int)checkIntArg(L, 5);
     cmd.srcRect = QRect(srcX, srcY, srcW, srcH);
-    cmd.x1 = (int)luaL_checkinteger(L, 6);
-    cmd.y1 = (int)luaL_checkinteger(L, 7);
-    cmd.x2 = (int)luaL_optinteger(L, 8, srcW);
-    cmd.y2 = (int)luaL_optinteger(L, 9, srcH);
+    cmd.x1 = (int)checkIntArg(L, 6);
+    cmd.y1 = (int)checkIntArg(L, 7);
+    cmd.x2 = (int)optIntArg(L, 8, srcW);
+    cmd.y2 = (int)optIntArg(L, 9, srcH);
 
     QMutexLocker locker(&mgr->drawMutex);
     mgr->drawCommands.push_back(cmd);
@@ -1203,13 +1227,13 @@ int LuaScriptManager::l_gui_drawimageregion(lua_State* L)
 int LuaScriptManager::l_forms_drawellipse(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Ellipse;
-    cmd.x1 = (int)luaL_checkinteger(L, 2);
-    cmd.y1 = (int)luaL_checkinteger(L, 3);
-    cmd.x2 = (int)luaL_checkinteger(L, 4);
-    cmd.y2 = (int)luaL_checkinteger(L, 5);
+    cmd.x1 = (int)checkIntArg(L, 2);
+    cmd.y1 = (int)checkIntArg(L, 3);
+    cmd.x2 = (int)checkIntArg(L, 4);
+    cmd.y2 = (int)checkIntArg(L, 5);
     cmd.color = checkColor(L, 6);
     cmd.fillColor = checkColor(L, 7);
 
@@ -1221,14 +1245,14 @@ int LuaScriptManager::l_forms_drawellipse(lua_State* L)
 int LuaScriptManager::l_forms_drawimage(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     LuaDrawCommand cmd;
     cmd.kind = LuaDrawCommand::Image;
     cmd.text = QString::fromUtf8(luaL_checkstring(L, 2));
-    cmd.x1 = (int)luaL_checkinteger(L, 3);
-    cmd.y1 = (int)luaL_checkinteger(L, 4);
-    cmd.x2 = (int)luaL_optinteger(L, 5, 0);
-    cmd.y2 = (int)luaL_optinteger(L, 6, 0);
+    cmd.x1 = (int)checkIntArg(L, 3);
+    cmd.y1 = (int)checkIntArg(L, 4);
+    cmd.x2 = (int)optIntArg(L, 5, 0);
+    cmd.y2 = (int)optIntArg(L, 6, 0);
 
     auto* fm = mgr->formsManager.get();
     fm->runOnUI([=]() { fm->addDrawCommand(handle, cmd); return 0; });
@@ -1238,7 +1262,7 @@ int LuaScriptManager::l_forms_drawimage(lua_State* L)
 int LuaScriptManager::l_forms_clear(lua_State* L)
 {
     LuaScriptManager* mgr = self(L);
-    int handle = (int)luaL_checkinteger(L, 1);
+    int handle = (int)checkIntArg(L, 1);
     QColor color = checkColor(L, 2);
 
     auto* fm = mgr->formsManager.get();
@@ -1349,9 +1373,9 @@ int LuaScriptManager::l_gameinfo_getromhash(lua_State* L)
 int LuaScriptManager::l_bit_band(lua_State* L)
 {
     int n = lua_gettop(L);
-    lua_Integer result = n >= 1 ? luaL_checkinteger(L, 1) : 0;
+    lua_Integer result = n >= 1 ? checkIntArg(L, 1) : 0;
     for (int i = 2; i <= n; i++)
-        result &= luaL_checkinteger(L, i);
+        result &= checkIntArg(L, i);
     lua_pushinteger(L, result);
     return 1;
 }
@@ -1359,9 +1383,9 @@ int LuaScriptManager::l_bit_band(lua_State* L)
 int LuaScriptManager::l_bit_bor(lua_State* L)
 {
     int n = lua_gettop(L);
-    lua_Integer result = n >= 1 ? luaL_checkinteger(L, 1) : 0;
+    lua_Integer result = n >= 1 ? checkIntArg(L, 1) : 0;
     for (int i = 2; i <= n; i++)
-        result |= luaL_checkinteger(L, i);
+        result |= checkIntArg(L, i);
     lua_pushinteger(L, result);
     return 1;
 }
@@ -1369,25 +1393,25 @@ int LuaScriptManager::l_bit_bor(lua_State* L)
 int LuaScriptManager::l_bit_bxor(lua_State* L)
 {
     int n = lua_gettop(L);
-    lua_Integer result = n >= 1 ? luaL_checkinteger(L, 1) : 0;
+    lua_Integer result = n >= 1 ? checkIntArg(L, 1) : 0;
     for (int i = 2; i <= n; i++)
-        result ^= luaL_checkinteger(L, i);
+        result ^= checkIntArg(L, i);
     lua_pushinteger(L, result);
     return 1;
 }
 
 int LuaScriptManager::l_bit_lshift(lua_State* L)
 {
-    lua_Integer a = luaL_checkinteger(L, 1);
-    lua_Integer b = luaL_checkinteger(L, 2);
+    lua_Integer a = checkIntArg(L, 1);
+    lua_Integer b = checkIntArg(L, 2);
     lua_pushinteger(L, a << b);
     return 1;
 }
 
 int LuaScriptManager::l_bit_rshift(lua_State* L)
 {
-    lua_Integer a = luaL_checkinteger(L, 1);
-    lua_Integer b = luaL_checkinteger(L, 2);
+    lua_Integer a = checkIntArg(L, 1);
+    lua_Integer b = checkIntArg(L, 2);
     lua_pushinteger(L, (lua_Integer)((uint64_t)a >> b));
     return 1;
 }
