@@ -11,6 +11,11 @@
 #include "DSiSupport.h"
 #include "DSi_I2C.h"
 #include "GPU3D_OpenGL.h"
+// Full definitions of the unified (2D+3D) renderers, GLRenderer and
+// SoftRenderer -- GPU3D_OpenGL.h/GPU3D_Compute.h only forward-declare
+// GLRenderer (it's a friend of their 3D-only backend classes).
+#include "GPU_OpenGL.h"
+#include "GPU_Soft.h"
 #include "MelonDS.h"
 #include "MelonInstance.h"
 #include "NDS.h"
@@ -301,7 +306,8 @@ u32 MelonInstance::runFrame()
     int screenHeight;
     if (currentRenderer == Renderer::OpenGl)
     {
-        int scale = static_cast<GLRenderer &>(nds->GPU.GetRenderer3D()).GetScaleFactor();
+        auto glRenderSettings = static_cast<OpenGlRenderSettings&>(*currentConfiguration->renderSettings);
+        int scale = glRenderSettings.scale;
         screenWidth = 256 * scale;
         screenHeight = (192 + 1) * scale;
     }
@@ -337,42 +343,59 @@ u32 MelonInstance::runFrame()
     // Validate frame after ensuring that the frame has finished presenting
     frameQueue.validateRenderFrame(renderFrame, screenWidth, screenHeight * 2);
 
-    [[unlikely]] if (nds->GPU.GetRenderer3D().NeedsShaderCompile())
+    [[unlikely]] if (nds->GPU.GetRenderer().NeedsShaderCompile())
     {
         // Compile all required shaders at once
         do
         {
             int currentShader;
             int shadersCount;
-            nds->GPU.GetRenderer3D().ShaderCompileStep(currentShader, shadersCount);
+            nds->GPU.GetRenderer().ShaderCompileStep(currentShader, shadersCount);
         }
-        while (nds->GPU.GetRenderer3D().NeedsShaderCompile());
+        while (nds->GPU.GetRenderer().NeedsShaderCompile());
     }
 
-    bool isRendererAccelerated = nds->GPU.GetRenderer3D().Accelerated;
-    if (isRendererAccelerated)
-    {
-        int backBuffer = nds->GPU.FrontBuffer ? 0 : 1;
-        nds->GPU.GetRenderer3D().SetOutputTexture(backBuffer, renderFrame->frameTexture);
-    }
-
+    // The renderer no longer accepts an externally-supplied output texture to
+    // render directly into; it always owns its own output storage, which we
+    // retrieve via GetFramebuffers() below, after the frame has run.
     u32 nLines = nds->RunFrame();
     retroAchievementsManager->FrameUpdate();
 
-    if (!isRendererAccelerated)
+    void* topBuf = nullptr;
+    void* bottomBuf = nullptr;
+    // true -> topBuf/bottomBuf are RAM framebuffers (software renderer).
+    // false -> topBuf points at the accelerated renderer's own GL texture handle.
+    bool isRamBased = nds->GPU.GetRenderer().GetFramebuffers(&topBuf, &bottomBuf);
+
+    if (isRamBased)
     {
-        int frontbuf = nds->GPU.FrontBuffer;
-        if (nds->GPU.Framebuffer[frontbuf][0] && nds->GPU.Framebuffer[frontbuf][1])
+        if (topBuf && bottomBuf)
         {
             glBindTexture(GL_TEXTURE_2D, renderFrame->frameTexture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, nds->GPU.Framebuffer[frontbuf][0].get());
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 192 + 2, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, nds->GPU.Framebuffer[frontbuf][1].get());
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, topBuf);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 192 + 2, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, bottomBuf);
             glBindTexture(GL_TEXTURE_2D, 0);
         }
     }
     else
     {
-        // Do nothing. Emulator already renders into the texture, which was set-up above
+        // The accelerated renderer (GLRenderer) hands back a single GL_TEXTURE_2D_ARRAY
+        // texture with 2 layers (0 = top screen, 1 = bottom screen), already scaled to
+        // its configured resolution. Copy both layers directly into our plain 2D frame
+        // texture, stacked the same way the software path lays out its RAM buffers
+        // (a scaled 2px gap between screens), using glCopyImageSubData (core in GLES 3.2,
+        // which this project targets) rather than an FBO blit or shader pass.
+        GLuint outputTex = *static_cast<GLuint*>(topBuf);
+        int scale = screenWidth / 256;
+
+        glCopyImageSubData(
+            outputTex, GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0,
+            renderFrame->frameTexture, GL_TEXTURE_2D, 0, 0, 0, 0,
+            screenWidth, 192 * scale, 1);
+        glCopyImageSubData(
+            outputTex, GL_TEXTURE_2D_ARRAY, 0, 0, 0, 1,
+            renderFrame->frameTexture, GL_TEXTURE_2D, 0, 0, (192 + 2) * scale, 0,
+            screenWidth, 192 * scale, 1);
     }
 
     bool isSleeping = nds->CPUStop & CPUStop_Sleep;
@@ -651,41 +674,57 @@ void MelonInstance::updateRenderer()
         switch (newRenderer)
         {
             case Renderer::Software:
-                nds->GPU.SetRenderer3D(std::make_unique<SoftRenderer>());
+                nds->GPU.SetRenderer(std::make_unique<SoftRenderer>(*nds));
                 break;
             case Renderer::OpenGl:
-                nds->GPU.SetRenderer3D(GLRenderer::New());
+                nds->GPU.SetRenderer(std::make_unique<GLRenderer>(*nds, /* compute */ false));
                 break;
             case Renderer::Compute:
-                nds->GPU.SetRenderer3D(ComputeRenderer::New());
+                // The compute-shader 3D backend is now just an internal option of
+                // GLRenderer (which handles both 2D and 3D output together),
+                // rather than a separate top-level renderer.
+                nds->GPU.SetRenderer(std::make_unique<GLRenderer>(*nds, /* compute */ true));
                 break;
             default: __builtin_unreachable();
         }
         currentRenderer = newRenderer;
     }
 
+    // 2D and 3D rendering are no longer configured separately; a single
+    // RendererSettings is passed to whichever unified Renderer is active.
+    melonDS::RendererSettings settings {};
     switch (newRenderer)
     {
         case Renderer::Software:
         {
             auto softwareRenderSettings = static_cast<SoftwareRenderSettings&>(*currentConfiguration->renderSettings);
-            static_cast<SoftRenderer&>(nds->GPU.GetRenderer3D()).SetThreaded(softwareRenderSettings.threadedRendering, nds->GPU);
+            settings.ScaleFactor = 1;
+            settings.Threaded = softwareRenderSettings.threadedRendering;
+            settings.HiresCoordinates = false;
+            settings.BetterPolygons = false;
             break;
         }
         case Renderer::OpenGl:
         {
             auto glRenderSettings = static_cast<OpenGlRenderSettings&>(*currentConfiguration->renderSettings);
-            static_cast<GLRenderer&>(nds->GPU.GetRenderer3D()).SetRenderSettings(glRenderSettings.betterPolygons, glRenderSettings.scale);
+            settings.ScaleFactor = glRenderSettings.scale;
+            settings.Threaded = false;
+            settings.HiresCoordinates = false;
+            settings.BetterPolygons = glRenderSettings.betterPolygons;
             break;
         }
         case Renderer::Compute:
         {
             auto computeRenderSettings = static_cast<ComputeRenderSettings&>(*currentConfiguration->renderSettings);
-            static_cast<ComputeRenderer&>(nds->GPU.GetRenderer3D()).SetRenderSettings(computeRenderSettings.scale,computeRenderSettings.highResCoordinates);
+            settings.ScaleFactor = computeRenderSettings.scale;
+            settings.Threaded = false;
+            settings.HiresCoordinates = computeRenderSettings.highResCoordinates;
+            settings.BetterPolygons = false;
             break;
         }
         default: __builtin_unreachable();
     }
+    nds->GPU.GetRenderer().SetRenderSettings(settings);
 }
 
 void MelonInstance::setBatteryLevels()

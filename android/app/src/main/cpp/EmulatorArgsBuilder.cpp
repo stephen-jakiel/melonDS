@@ -20,7 +20,7 @@ std::unique_ptr<ARM9BIOSImage> loadARM9BIOS(const EmulatorConfiguration& configu
 {
     if (configuration.userInternalFirmwareAndBios)
     {
-        return std::make_unique<ARM9BIOSImage>(bios_arm9_bin);
+        return std::make_unique<ARM9BIOSImage>(FreeBIOSGetNtrArm9());
     }
 
     std::string path = configuration.dsBios9Path;
@@ -43,7 +43,7 @@ std::unique_ptr<ARM7BIOSImage> loadARM7BIOS(const EmulatorConfiguration& configu
 {
     if (configuration.userInternalFirmwareAndBios)
     {
-        return std::make_unique<ARM7BIOSImage>(bios_arm7_bin);
+        return std::make_unique<ARM7BIOSImage>(FreeBIOSGetNtrArm7());
     }
 
     std::string path = configuration.dsBios7Path;
@@ -488,12 +488,13 @@ std::optional<std::unique_ptr<NDSArgs>> BuildArgsFromConfiguration(const Emulato
             std::move(arm7ibios),
             std::move(*nand),
             std::move(sdcard),
-            false,
+            // DSPHLE. FullBIOSBoot (previously the field before this one) was
+            // removed upstream in favor of auto-detecting it from BIOS checksums.
             true,
         };
 
         std::unique_ptr<DSiArgs> uniqueArgs = std::make_unique<DSiArgs>(std::move(_dsiArgs));
-        return uniqueArgs;
+        return std::optional<std::unique_ptr<NDSArgs>>(std::unique_ptr<NDSArgs>(std::move(uniqueArgs)));
     }
     else
     {

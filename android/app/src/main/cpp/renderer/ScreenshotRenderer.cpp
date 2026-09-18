@@ -23,9 +23,11 @@ void ScreenshotRenderer::renderScreenshot(GPU* gpu, Renderer renderer, Frame* re
 {
     if (renderer == Renderer::Software)
     {
-        int frontBuffer = gpu->FrontBuffer;
-        memcpy(screenshotBuffer, gpu->Framebuffer[frontBuffer][0].get(), 256 * 192 * 4);
-        memcpy(&screenshotBuffer[256 * 192], gpu->Framebuffer[frontBuffer][1].get(), 256 * 192 * 4);
+        void* top = nullptr;
+        void* bottom = nullptr;
+        gpu->GetRenderer().GetFramebuffers(&top, &bottom);
+        memcpy(screenshotBuffer, top, 256 * 192 * 4);
+        memcpy(&screenshotBuffer[256 * 192], bottom, 256 * 192 * 4);
     }
     else
     {
