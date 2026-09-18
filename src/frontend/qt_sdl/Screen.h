@@ -26,6 +26,7 @@
 #include <QWidget>
 #include <QImage>
 #include <QMutex>
+#include <QPoint>
 #include <QScreen>
 #include <QCloseEvent>
 #include <QTimer>
@@ -69,6 +70,14 @@ public:
 
     void osdSetEnabled(bool enabled);
     void osdAddMessage(unsigned int color, const char* msg);
+
+    // Current cursor position mapped into the same logical coordinate space
+    // gui.* drawing uses (NDS-native pixels, 256x384, plus any
+    // client.SetGameExtraPadding() space) -- so a script comparing this
+    // against where it drew something (e.g. a clickable icon) lines up with
+    // what's actually on screen. Same standard-top-then-bottom-layout
+    // assumption as the gui.* overlay itself.
+    QPointF luaMousePosition();
 
     virtual void drawScreen() {}// = 0;
 

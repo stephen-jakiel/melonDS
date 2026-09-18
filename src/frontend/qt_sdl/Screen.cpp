@@ -21,6 +21,7 @@
 #include <optional>
 #include <cmath>
 
+#include <QCursor>
 #include <QPaintEvent>
 #include <QPainter>
 
@@ -237,6 +238,16 @@ QSize ScreenPanel::screenGetMinSize(int factor = 1)
     return QSize(
         base.width() + emuInstance->luaPadLeft + emuInstance->luaPadRight,
         base.height() + emuInstance->luaPadTop + emuInstance->luaPadBottom);
+}
+
+QPointF ScreenPanel::luaMousePosition()
+{
+    QPoint local = mapFromGlobal(QCursor::pos());
+    double sx = (double)width() / (256.0 + emuInstance->luaPadLeft + emuInstance->luaPadRight);
+    double sy = (double)height() / (384.0 + emuInstance->luaPadTop + emuInstance->luaPadBottom);
+    if (sx <= 0 || sy <= 0)
+        return QPointF(0, 0);
+    return QPointF(local.x() / sx, local.y() / sy);
 }
 
 void ScreenPanel::onScreenLayoutChanged()

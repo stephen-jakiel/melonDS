@@ -20,6 +20,7 @@
 
 #include <QCursor>
 #include <QDir>
+#include <QGuiApplication>
 #include <QFileInfo>
 #include <QImage>
 #include <QMap>
@@ -1192,20 +1193,31 @@ int LuaScriptManager::l_input_getmouse(lua_State* L)
     LuaScriptManager* mgr = self(L);
     auto* fm = mgr->formsManager.get();
     EmuInstance* inst = mgr->emuInstance;
-    QPoint pos = fm->runOnUI([=]() { return inst->getMainWindow()->mapFromGlobal(QCursor::pos()); });
+
+    // Position in the same logical space gui.* drawing uses (not raw
+    // window pixels), and real button state (previously always false,
+    // which meant nothing a script drew as "clickable" on the game view
+    // could ever actually register a click).
+    struct { QPointF pos; Qt::MouseButtons buttons; } state;
+    state = fm->runOnUI([=]() {
+        return decltype(state){
+            inst->getMainWindow()->panel->luaMousePosition(),
+            QGuiApplication::mouseButtons()
+        };
+    });
 
     lua_newtable(L);
-    lua_pushinteger(L, pos.x());
+    lua_pushinteger(L, (lua_Integer)llround(state.pos.x()));
     lua_setfield(L, -2, "X");
-    lua_pushinteger(L, pos.y());
+    lua_pushinteger(L, (lua_Integer)llround(state.pos.y()));
     lua_setfield(L, -2, "Y");
-    lua_pushinteger(L, 0); // scroll wheel tracking not implemented
+    lua_pushinteger(L, 0); // scroll wheel delta tracking not implemented
     lua_setfield(L, -2, "Wheel");
-    lua_pushboolean(L, false);
+    lua_pushboolean(L, state.buttons & Qt::LeftButton);
     lua_setfield(L, -2, "Left");
-    lua_pushboolean(L, false);
+    lua_pushboolean(L, state.buttons & Qt::MiddleButton);
     lua_setfield(L, -2, "Middle");
-    lua_pushboolean(L, false);
+    lua_pushboolean(L, state.buttons & Qt::RightButton);
     lua_setfield(L, -2, "Right");
     return 1;
 }
