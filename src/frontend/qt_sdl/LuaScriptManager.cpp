@@ -19,6 +19,8 @@
 #include "LuaScriptManager.h"
 
 #include <QCursor>
+#include <QDir>
+#include <QFileInfo>
 #include <QMutexLocker>
 #include <chrono>
 #include <cstdarg>
@@ -116,6 +118,17 @@ void LuaScriptManager::threadMain(QString scriptPath)
 {
     if (!emuInstance->getEmuThread()->emuIsActive())
         logf("No game running yet -- waiting for a ROM to be loaded or firmware booted...");
+
+    // Most BizHawk-style scripts (this tracker included) load their own
+    // submodules and read/write their own data files using paths relative
+    // to the *script's own* directory, e.g. dofile("ironmon_tracker/Main.lua")
+    // or io.open("Settings.ini") -- which only resolve correctly if that's
+    // also the process's current working directory. melonDS's own file
+    // handling doesn't depend on the working directory (it resolves
+    // everything against an absolute emuDirectory instead), so changing it
+    // here is safe.
+    scriptDir = QFileInfo(scriptPath).absolutePath();
+    QDir::setCurrent(scriptDir);
 
     L = luaL_newstate();
     luaL_openlibs(L);

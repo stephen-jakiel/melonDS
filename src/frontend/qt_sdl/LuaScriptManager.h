@@ -188,6 +188,7 @@ private:
     std::vector<LuaDrawCommand> displayCommands;
 
     std::unique_ptr<LuaFormsManager> formsManager;
+    QString scriptDir;
 };
 
 #endif // LUASCRIPTMANAGER_H
