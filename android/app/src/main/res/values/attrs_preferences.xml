@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="DirectoryPickerPreference">
+        <attr name="type" format="enum">
+            <enum name="file" value="0" />
+            <enum name="directory" value="1" />
+        </attr>
+
+        <attr name="selection" format="enum">
+            <enum name="single" value="0" />
+            <enum name="multi" value="1" />
+        </attr>
+
+        <attr name="mimeType" format="string" />
+
+        <attr name="permissions" format="enum">
+            <enum name="read" value="0" />
+            <enum name="write" value="1" />
+            <enum name="read_write" value="2" />
+        </attr>
+
+        <attr name="persistPermissions" format="boolean" />
+    </declare-styleable>
+
+    <declare-styleable name="BiosDirectoryPickerPreference">
+        <attr name="consoleType" format="enum">
+            <enum name="ds" value="0"/>
+            <enum name="dsi" value="1"/>
+        </attr>
+    </declare-styleable>
+</resources>

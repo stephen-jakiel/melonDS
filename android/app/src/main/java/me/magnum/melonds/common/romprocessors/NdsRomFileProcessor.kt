@@ -1,0 +1,71 @@
+package me.magnum.melonds.common.romprocessors
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import me.magnum.melonds.common.uridelegates.UriHandler
+import me.magnum.melonds.domain.model.RomInfo
+import me.magnum.melonds.domain.model.RomMetadata
+import me.magnum.melonds.domain.model.rom.Rom
+import me.magnum.melonds.domain.model.rom.config.RomConfig
+import me.magnum.melonds.extensions.isBlank
+import me.magnum.melonds.extensions.nameWithoutExtension
+import me.magnum.melonds.utils.RomProcessor
+
+class NdsRomFileProcessor(private val context: Context, private val uriHandler: UriHandler) : RomFileProcessor {
+
+    override fun getRomFromUri(romUri: Uri, parentUri: Uri?): Rom? {
+        return try {
+            getRomMetadata(romUri)?.let { metadata ->
+                val romDocument = uriHandler.getUriDocument(romUri)
+                val romName = metadata.romTitle.takeUnless { it.isBlank() } ?: romDocument?.nameWithoutExtension ?: ""
+                Rom(
+                    name = romName,
+                    developerName = metadata.developerName,
+                    fileName = romDocument?.name ?: "",
+                    uri = romUri,
+                    parentTreeUri = parentUri,
+                    config = if (metadata.isDSiWareTitle) RomConfig.forDsiWareTitle() else RomConfig.default(),
+                    lastPlayed = null,
+                    isDsiWareTitle = metadata.isDSiWareTitle,
+                    retroAchievementsHash = metadata.retroAchievementsHash
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    override fun getRomIcon(rom: Rom): Bitmap? {
+        return try {
+            context.contentResolver.openInputStream(rom.uri)?.use { inputStream ->
+                RomProcessor.getRomIcon(inputStream)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    override fun getRomInfo(rom: Rom): RomInfo? {
+        return try {
+            context.contentResolver.openInputStream(rom.uri)?.use { inputStream ->
+                RomProcessor.getRomInfo(rom, inputStream)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    override suspend fun getRealRomUri(rom: Rom): Uri {
+        return rom.uri
+    }
+
+    private fun getRomMetadata(uri: Uri): RomMetadata? {
+        return context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            RomProcessor.getRomMetadata(inputStream)
+        }
+    }
+}
