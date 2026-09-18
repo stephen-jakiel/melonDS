@@ -23,13 +23,16 @@
 #include <QMutex>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <vector>
 
 struct lua_State;
 class EmuInstance;
+class LuaFormsManager;
 
 // A single gui.draw*() call recorded by the script thread, consumed by the
 // UI thread when painting the next frame. Coordinates are in NDS-native
@@ -106,11 +109,44 @@ private:
     static int l_gui_drawline(lua_State* L);
     static int l_gui_drawpixel(lua_State* L);
 
+    static int l_forms_newform(lua_State* L);
+    static int l_forms_button(lua_State* L);
+    static int l_forms_label(lua_State* L);
+    static int l_forms_checkbox(lua_State* L);
+    static int l_forms_textbox(lua_State* L);
+    static int l_forms_dropdown(lua_State* L);
+    static int l_forms_setdropdownitems(lua_State* L);
+    static int l_forms_picturebox(lua_State* L);
+    static int l_forms_setproperty(lua_State* L);
+    static int l_forms_setlocation(lua_State* L);
+    static int l_forms_settext(lua_State* L);
+    static int l_forms_gettext(lua_State* L);
+    static int l_forms_ischecked(lua_State* L);
+    static int l_forms_destroy(lua_State* L);
+    static int l_forms_destroyall(lua_State* L);
+    static int l_forms_addclick(lua_State* L);
+    static int l_forms_getmousex(lua_State* L);
+    static int l_forms_getmousey(lua_State* L);
+    static int l_forms_openfile(lua_State* L);
+    static int l_forms_drawtext(lua_State* L);
+    static int l_forms_drawrectangle(lua_State* L);
+    static int l_forms_refresh(lua_State* L);
+
     // Parses a BizHawk-style packed 0xAARRGGBB color argument at the given
     // stack index. Absent/nil is treated the same as alpha 0 (invisible),
     // matching how the tracker itself uses 0x00000000 to mean "don't draw
     // this part" (e.g. no outline on a filled rectangle).
     static QColor checkColor(lua_State* L, int idx);
+    // Accepts either a plain array table ({"a","b"}) or an associative one
+    // ({[key]=val, ...}), matching how the tracker calls forms.dropdown/
+    // forms.setdropdownitems both ways in practice.
+    static QStringList checkStringList(lua_State* L, int idx);
+
+    // Invokes every Lua callback (button clicks, form close) queued by the
+    // UI thread since the last call. Must only run on the script thread
+    // (Lua state isn't safe to touch from anywhere else); called once per
+    // emu.frameadvance(), same as gui.* command publishing.
+    void dispatchFormsCallbacks();
 
     EmuInstance* emuInstance;
     lua_State* L = nullptr;
@@ -128,6 +164,8 @@ private:
     QMutex drawMutex;
     std::vector<LuaDrawCommand> drawCommands;
     std::vector<LuaDrawCommand> displayCommands;
+
+    std::unique_ptr<LuaFormsManager> formsManager;
 };
 
 #endif // LUASCRIPTMANAGER_H

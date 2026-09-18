@@ -14,6 +14,7 @@ set(SOURCES_QT_SDL
     CheatImportDialog.cpp
     CheatsDialog.cpp
     LuaConsoleDialog.cpp
+    LuaFormsManager.cpp
     LuaScriptManager.cpp
     Config.cpp
     DateTimeDialog.cpp

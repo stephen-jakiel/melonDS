@@ -34,6 +34,7 @@ extern "C"
 
 #include "EmuInstance.h"
 #include "EmuThread.h"
+#include "LuaFormsManager.h"
 #include "NDS.h"
 
 using namespace melonDS;
@@ -45,6 +46,11 @@ static const char* kSelfRegistryKey = "melonDS.LuaScriptManager";
 
 LuaScriptManager::LuaScriptManager(EmuInstance* inst) : emuInstance(inst)
 {
+    // Constructed here on the UI thread (LuaScriptManager itself is always
+    // constructed from EmuInstance's constructor), giving it the thread
+    // affinity its Qt::BlockingQueuedConnection bridge to the script thread
+    // depends on.
+    formsManager = std::make_unique<LuaFormsManager>();
 }
 
 LuaScriptManager::~LuaScriptManager()
@@ -92,6 +98,9 @@ void LuaScriptManager::stop()
     emuInstance->getEmuThread()->frameAdvanceSemaphore.release();
     scriptThread.join();
     running.store(false);
+
+    // Matches BizHawk's behavior: a script's forms don't outlive it.
+    formsManager->destroyAll();
 }
 
 LuaScriptManager* LuaScriptManager::self(lua_State* L)
@@ -171,6 +180,34 @@ void LuaScriptManager::registerAPI()
     };
     luaL_newlib(L, guiFuncs);
     lua_setglobal(L, "gui");
+
+    static const luaL_Reg formsFuncs[] = {
+        {"newform", l_forms_newform},
+        {"button", l_forms_button},
+        {"label", l_forms_label},
+        {"checkbox", l_forms_checkbox},
+        {"textbox", l_forms_textbox},
+        {"dropdown", l_forms_dropdown},
+        {"setdropdownitems", l_forms_setdropdownitems},
+        {"pictureBox", l_forms_picturebox},
+        {"setproperty", l_forms_setproperty},
+        {"setlocation", l_forms_setlocation},
+        {"settext", l_forms_settext},
+        {"gettext", l_forms_gettext},
+        {"ischecked", l_forms_ischecked},
+        {"destroy", l_forms_destroy},
+        {"destroyall", l_forms_destroyall},
+        {"addclick", l_forms_addclick},
+        {"getMouseX", l_forms_getmousex},
+        {"getMouseY", l_forms_getmousey},
+        {"openfile", l_forms_openfile},
+        {"drawText", l_forms_drawtext},
+        {"drawRectangle", l_forms_drawrectangle},
+        {"refresh", l_forms_refresh},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, formsFuncs);
+    lua_setglobal(L, "forms");
 }
 
 int LuaScriptManager::l_print(lua_State* L)
@@ -288,6 +325,11 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
     if (mgr->stopRequested.load())
         return luaL_error(L, "script stopped");
 
+    // Dispatch any pending forms.* callbacks (button clicks, form close)
+    // queued by the UI thread since the last call -- always, even while
+    // idling for a ROM to load, so e.g. a settings form stays responsive.
+    mgr->dispatchFormsCallbacks();
+
     EmuThread* thread = mgr->emuInstance->getEmuThread();
     if (!thread->emuIsActive())
     {
@@ -400,5 +442,367 @@ int LuaScriptManager::l_gui_drawpixel(lua_State* L)
 
     QMutexLocker locker(&mgr->drawMutex);
     mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+// --- forms.* -----------------------------------------------------------
+//
+// Every binding below marshals the actual QWidget work onto the UI thread
+// via LuaFormsManager::runOnUI (a blocking cross-thread call: it's always
+// safe to capture-by-value locals here, since the calling script thread is
+// suspended for the whole call, not racing the UI thread against them).
+
+// Pops a function argument (if present) into the Lua registry so it can be
+// invoked later from dispatchFormsCallbacks(); returns 0 (an invalid ref)
+// for a missing/nil argument.
+static int refFunctionArg(lua_State* L, int idx)
+{
+    if (lua_isnoneornil(L, idx))
+        return 0;
+    luaL_checktype(L, idx, LUA_TFUNCTION);
+    lua_pushvalue(L, idx);
+    return luaL_ref(L, LUA_REGISTRYINDEX);
+}
+
+QStringList LuaScriptManager::checkStringList(lua_State* L, int idx)
+{
+    QStringList result;
+    if (lua_isnoneornil(L, idx) || !lua_istable(L, idx))
+        return result;
+
+    lua_Integer n = lua_rawlen(L, idx);
+    for (lua_Integer i = 1; i <= n; i++)
+    {
+        lua_rawgeti(L, idx, (int)i);
+        if (lua_type(L, -1) == LUA_TSTRING)
+            result << QString::fromUtf8(lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+
+    if (result.isEmpty())
+    {
+        // Not a plain array -- fall back to iterating all values (covers an
+        // associative table like {[key]=val, ...}).
+        lua_pushnil(L);
+        while (lua_next(L, idx) != 0)
+        {
+            if (lua_type(L, -1) == LUA_TSTRING)
+                result << QString::fromUtf8(lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+    return result;
+}
+
+void LuaScriptManager::dispatchFormsCallbacks()
+{
+    for (int ref : formsManager->takePendingCallbacks())
+    {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+        if (lua_pcall(L, 0, 0, 0) != LUA_OK)
+        {
+            const char* err = lua_tostring(L, -1);
+            logf("Lua error in forms callback: %s", err ? err : "(unknown error)");
+            lua_pop(L, 1);
+        }
+    }
+}
+
+int LuaScriptManager::l_forms_newform(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int w = (int)luaL_checkinteger(L, 1);
+    int h = (int)luaL_checkinteger(L, 2);
+    QString title = QString::fromUtf8(luaL_optstring(L, 3, "Script Window"));
+    int onCloseRef = refFunctionArg(L, 4);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->newForm(w, h, title, onCloseRef); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_button(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int form = (int)luaL_checkinteger(L, 1);
+    QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
+    int onClickRef = refFunctionArg(L, 3);
+    int x = (int)luaL_optinteger(L, 4, 0);
+    int y = (int)luaL_optinteger(L, 5, 0);
+    int w = (int)luaL_optinteger(L, 6, 75);
+    int h = (int)luaL_optinteger(L, 7, 23);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->addButton(form, caption, onClickRef, x, y, w, h); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_label(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int form = (int)luaL_checkinteger(L, 1);
+    QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
+    int x = (int)luaL_optinteger(L, 3, 0);
+    int y = (int)luaL_optinteger(L, 4, 0);
+    int w = (int)luaL_optinteger(L, 5, 0);
+    int h = (int)luaL_optinteger(L, 6, 0);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->addLabel(form, caption, x, y, w, h); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_checkbox(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int form = (int)luaL_checkinteger(L, 1);
+    QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
+    int x = (int)luaL_optinteger(L, 3, 0);
+    int y = (int)luaL_optinteger(L, 4, 0);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->addCheckbox(form, caption, x, y); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_textbox(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int form = (int)luaL_checkinteger(L, 1);
+    QString caption = QString::fromUtf8(luaL_optstring(L, 2, ""));
+    int w = (int)luaL_optinteger(L, 3, 100);
+    int h = (int)luaL_optinteger(L, 4, 20);
+    // arg 5 ("type", e.g. "HEX"/"NUMBER" input filtering) intentionally
+    // ignored -- just a plain text field, no input validation.
+    int x = (int)luaL_optinteger(L, 6, 0);
+    int y = (int)luaL_optinteger(L, 7, 0);
+    bool multiline = lua_gettop(L) >= 8 && lua_toboolean(L, 8);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->addTextbox(form, caption, w, h, x, y, multiline); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_dropdown(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int form = (int)luaL_checkinteger(L, 1);
+    QStringList items = checkStringList(L, 2);
+    int x = (int)luaL_optinteger(L, 3, 0);
+    int y = (int)luaL_optinteger(L, 4, 0);
+    int w = (int)luaL_optinteger(L, 5, 100);
+    int h = (int)luaL_optinteger(L, 6, 20);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->addDropdown(form, items, x, y, w, h); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_setdropdownitems(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    QStringList items = checkStringList(L, 2);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->setDropdownItems(handle, items); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_picturebox(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int form = (int)luaL_checkinteger(L, 1);
+    int x = (int)luaL_checkinteger(L, 2);
+    int y = (int)luaL_checkinteger(L, 3);
+    int w = (int)luaL_checkinteger(L, 4);
+    int h = (int)luaL_checkinteger(L, 5);
+
+    auto* fm = mgr->formsManager.get();
+    int handle = fm->runOnUI([=]() { return fm->addPictureBox(form, x, y, w, h); });
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_setproperty(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    QString prop = QString::fromUtf8(luaL_checkstring(L, 2));
+
+    QString value;
+    if (lua_isboolean(L, 3))
+        value = lua_toboolean(L, 3) ? "true" : "false";
+    else
+    {
+        size_t len;
+        const char* s = luaL_tolstring(L, 3, &len);
+        value = QString::fromUtf8(s, (int)len);
+        lua_pop(L, 1);
+    }
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->setProperty(handle, prop, value); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_setlocation(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    int x = (int)luaL_checkinteger(L, 2);
+    int y = (int)luaL_checkinteger(L, 3);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->setLocation(handle, x, y); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_settext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    QString text = QString::fromUtf8(luaL_checkstring(L, 2));
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->setText(handle, text); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_gettext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+
+    auto* fm = mgr->formsManager.get();
+    QString text = fm->runOnUI([=]() { return fm->getText(handle); });
+    lua_pushstring(L, text.toUtf8().constData());
+    return 1;
+}
+
+int LuaScriptManager::l_forms_ischecked(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+
+    auto* fm = mgr->formsManager.get();
+    bool checked = fm->runOnUI([=]() { return fm->isChecked(handle); });
+    lua_pushboolean(L, checked);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_destroy(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->destroyHandle(handle); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_destroyall(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->destroyAll(); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_addclick(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    int ref = refFunctionArg(L, 2);
+    if (ref == 0)
+        return 0;
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->setClickCallback(handle, ref); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_getmousex(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+
+    auto* fm = mgr->formsManager.get();
+    int x = fm->runOnUI([=]() { return fm->getMouseX(handle); });
+    lua_pushinteger(L, x);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_getmousey(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+
+    auto* fm = mgr->formsManager.get();
+    int y = fm->runOnUI([=]() { return fm->getMouseY(handle); });
+    lua_pushinteger(L, y);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_openfile(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    QString initialDir = (lua_gettop(L) >= 2 && lua_isstring(L, 2)) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    QString filter = (lua_gettop(L) >= 3 && lua_isstring(L, 3)) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    QString title = (lua_gettop(L) >= 4 && lua_isstring(L, 4)) ? QString::fromUtf8(lua_tostring(L, 4)) : QString();
+
+    auto* fm = mgr->formsManager.get();
+    QString path = fm->runOnUI([=]() { return fm->openFile(initialDir, filter, title); });
+    lua_pushstring(L, path.toUtf8().constData());
+    return 1;
+}
+
+int LuaScriptManager::l_forms_drawtext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Text;
+    cmd.x1 = (int)luaL_checkinteger(L, 2);
+    cmd.y1 = (int)luaL_checkinteger(L, 3);
+    cmd.text = QString::fromUtf8(luaL_checkstring(L, 4));
+    cmd.color = lua_gettop(L) >= 5 ? checkColor(L, 5) : QColor(255, 255, 255, 255);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->addDrawCommand(handle, cmd); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_drawrectangle(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Rect;
+    cmd.x1 = (int)luaL_checkinteger(L, 2);
+    cmd.y1 = (int)luaL_checkinteger(L, 3);
+    cmd.x2 = (int)luaL_checkinteger(L, 4);
+    cmd.y2 = (int)luaL_checkinteger(L, 5);
+    cmd.color = checkColor(L, 6);
+    cmd.fillColor = checkColor(L, 7);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->addDrawCommand(handle, cmd); return 0; });
+    return 0;
+}
+
+int LuaScriptManager::l_forms_refresh(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)luaL_checkinteger(L, 1);
+
+    auto* fm = mgr->formsManager.get();
+    fm->runOnUI([=]() { fm->refresh(handle); return 0; });
     return 0;
 }
