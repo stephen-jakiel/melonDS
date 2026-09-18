@@ -53,7 +53,7 @@ LuaScriptManager::~LuaScriptManager()
 std::vector<LuaDrawCommand> LuaScriptManager::getDrawCommands()
 {
     QMutexLocker locker(&drawMutex);
-    return drawCommands;
+    return displayCommands;
 }
 
 void LuaScriptManager::logf(const char* fmt, ...)
@@ -283,18 +283,20 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
     if (mgr->stopRequested.load())
         return luaL_error(L, "script stopped");
 
-    // Whatever the script drew via gui.* since the last frameadvance() is
-    // about to be shown for the frame we're stepping into now; anything
-    // drawn after this point belongs to the *next* frame.
-    {
-        QMutexLocker locker(&mgr->drawMutex);
-        mgr->drawCommands.clear();
-    }
-
     EmuThread* thread = mgr->emuInstance->getEmuThread();
     thread->emuFrameStep();
     thread->frameAdvanceSemaphore.acquire();
     mgr->frameCount++;
+
+    // The frame this call just produced should show whatever the script
+    // drew (via gui.*) since the *previous* frameadvance() -- i.e. what's
+    // sitting in drawCommands right now. Publish it for paint to read, and
+    // start collecting fresh for the next frame.
+    {
+        QMutexLocker locker(&mgr->drawMutex);
+        mgr->displayCommands = std::move(mgr->drawCommands);
+        mgr->drawCommands.clear();
+    }
 
     if (mgr->stopRequested.load())
         return luaL_error(L, "script stopped");

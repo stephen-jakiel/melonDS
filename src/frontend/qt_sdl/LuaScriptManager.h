@@ -119,8 +119,15 @@ private:
     std::atomic<bool> stopRequested {false};
     uint64_t frameCount = 0;
 
+    // drawCommands accumulates the script's gui.draw*() calls for the frame
+    // currently being stepped into. Right after that frame finishes,
+    // frameadvance() moves it into displayCommands (what paint reads) and
+    // starts drawCommands fresh -- so paint always sees a complete set from
+    // one specific frame, never a partially-drawn/just-cleared one, even
+    // though the script thread and UI thread run concurrently.
     QMutex drawMutex;
     std::vector<LuaDrawCommand> drawCommands;
+    std::vector<LuaDrawCommand> displayCommands;
 };
 
 #endif // LUASCRIPTMANAGER_H
