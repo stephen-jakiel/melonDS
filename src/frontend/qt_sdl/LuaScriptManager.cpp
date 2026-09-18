@@ -46,6 +46,7 @@ extern "C"
 #include "NDS.h"
 #include "NDSCart.h"
 #include "NDSCart/CartCommon.h"
+#include "Savestate.h"
 #include "sha1/sha1.hpp"
 
 using namespace melonDS;
@@ -332,6 +333,15 @@ void LuaScriptManager::registerAPI()
     };
     luaL_newlib(L, savestateFuncs);
     lua_setglobal(L, "savestate");
+
+    static const luaL_Reg memorysavestateFuncs[] = {
+        {"savecorestate", l_memorysavestate_savecorestate},
+        {"loadcorestate", l_memorysavestate_loadcorestate},
+        {"removestate", l_memorysavestate_removestate},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, memorysavestateFuncs);
+    lua_setglobal(L, "memorysavestate");
 
     static const luaL_Reg joypadFuncs[] = {
         {"get", l_joypad_get},
@@ -1107,6 +1117,58 @@ int LuaScriptManager::l_savestate_load(lua_State* L)
     LuaScriptManager* mgr = self(L);
     QString path = QString::fromUtf8(luaL_checkstring(L, 1));
     mgr->emuInstance->getEmuThread()->loadState(path);
+    return 0;
+}
+
+// memorysavestate.*: unlike savestate.save/load (routed through EmuThread's
+// message queue since they can be called from any thread at any time),
+// these call NDS::DoSavestate() directly on the calling (script) thread.
+// That's safe specifically because of how emu.frameadvance() works: by the
+// time it returns, EmuThread has finished that frame's nds-touching work
+// and won't touch nds again until the *next* frameadvance() call, so the
+// window between two frameadvance() calls -- which is the only time a
+// script can call these -- is guaranteed free of concurrent access.
+int LuaScriptManager::l_memorysavestate_savecorestate(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    NDS* nds = mgr->emuInstance->getNDS();
+
+    Savestate state;
+    if (state.Error)
+        return luaL_error(L, "failed to allocate savestate buffer");
+    nds->DoSavestate(&state);
+
+    int id = mgr->nextMemorySavestateId++;
+    const uint8_t* data = (const uint8_t*)state.Buffer();
+    mgr->memorySavestates[id] = std::vector<uint8_t>(data, data + state.Length());
+
+    lua_pushinteger(L, id);
+    return 1;
+}
+
+int LuaScriptManager::l_memorysavestate_loadcorestate(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int id = (int)checkIntArg(L, 1);
+
+    auto it = mgr->memorySavestates.constFind(id);
+    if (it == mgr->memorySavestates.constEnd())
+        return luaL_error(L, "memorysavestate.loadcorestate: unknown id %d", id);
+
+    NDS* nds = mgr->emuInstance->getNDS();
+    Savestate state((void*)it.value().data(), (u32)it.value().size(), false);
+    if (state.Error)
+        return luaL_error(L, "failed to load in-memory savestate %d", id);
+    nds->DoSavestate(&state);
+
+    return 0;
+}
+
+int LuaScriptManager::l_memorysavestate_removestate(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int id = (int)checkIntArg(L, 1);
+    mgr->memorySavestates.remove(id);
     return 0;
 }
 

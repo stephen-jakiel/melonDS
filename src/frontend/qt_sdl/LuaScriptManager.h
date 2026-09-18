@@ -20,6 +20,7 @@
 #define LUASCRIPTMANAGER_H
 
 #include <QColor>
+#include <QMap>
 #include <QMutex>
 #include <QObject>
 #include <QPoint>
@@ -197,6 +198,9 @@ private:
     static int l_client_saveram(lua_State* L);
     static int l_savestate_save(lua_State* L);
     static int l_savestate_load(lua_State* L);
+    static int l_memorysavestate_savecorestate(lua_State* L);
+    static int l_memorysavestate_loadcorestate(lua_State* L);
+    static int l_memorysavestate_removestate(lua_State* L);
     static int l_joypad_get(lua_State* L);
     static int l_input_getmouse(lua_State* L);
     // comm.* (Streamerbot/Crowd Control network integration): stubbed as
@@ -242,6 +246,11 @@ private:
     std::unique_ptr<LuaFormsManager> formsManager;
     QString scriptDir;
     std::vector<int> exitCallbackRefs; // event.onexit/onconsoleclose
+
+    // memorysavestate.*: in-memory (not file-based) savestates, keyed by an
+    // incrementing id handed back to the script.
+    QMap<int, std::vector<uint8_t>> memorySavestates;
+    int nextMemorySavestateId = 1;
 };
 
 #endif // LUASCRIPTMANAGER_H
