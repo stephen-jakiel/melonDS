@@ -102,6 +102,14 @@ LuaScriptManager* LuaScriptManager::self(lua_State* L)
 
 void LuaScriptManager::threadMain(QString scriptPath)
 {
+    if (!emuInstance->getEmuThread()->emuIsActive())
+    {
+        logf("No game is running -- load a ROM or boot firmware before running a script.");
+        running.store(false);
+        emit scriptStopped();
+        return;
+    }
+
     L = luaL_newstate();
     luaL_openlibs(L);
 
@@ -284,6 +292,9 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
         return luaL_error(L, "script stopped");
 
     EmuThread* thread = mgr->emuInstance->getEmuThread();
+    if (!thread->emuIsActive())
+        return luaL_error(L, "no game is running");
+
     thread->emuFrameStep();
     thread->frameAdvanceSemaphore.acquire();
     mgr->frameCount++;
