@@ -107,6 +107,7 @@ import me.magnum.melonds.ui.emulator.rewind.model.RewindWindow
 import me.magnum.melonds.ui.emulator.rom.SaveStateAdapter
 import me.magnum.melonds.ui.emulator.ui.AchievementListDialog
 import me.magnum.melonds.ui.emulator.ui.AchievementUpdatesUi
+import me.magnum.melonds.ui.emulator.ui.PauseMenuButtonUi
 import me.magnum.melonds.ui.emulator.ui.PendingSubmissionsDialog
 import me.magnum.melonds.ui.emulator.ui.RewindWindowUi
 import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
@@ -371,6 +372,8 @@ class EmulatorActivity : AppCompatActivity() {
                 }
 
                 AchievementUpdatesUi(viewModel)
+
+                PauseMenuButtonUi(onClick = { viewModel.pauseEmulator(true) })
 
                 LuaOverlayUi(isScriptRunning = luaScriptRunning.value)
 
