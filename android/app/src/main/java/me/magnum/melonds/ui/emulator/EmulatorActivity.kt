@@ -15,7 +15,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -107,6 +109,7 @@ import me.magnum.melonds.ui.emulator.ui.RewindWindowUi
 import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
 import me.magnum.melonds.ui.settings.SettingsActivity
 import me.magnum.melonds.ui.theme.MelonTheme
+import java.io.File
 import java.text.SimpleDateFormat
 import javax.inject.Inject
 
@@ -886,11 +889,21 @@ class EmulatorActivity : AppCompatActivity() {
             hint = getString(R.string.lua_script_path_hint)
             setText(lastLuaScriptPath)
         }
+        val browseButton = Button(this).apply {
+            text = getString(R.string.browse)
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val padding = (16 * resources.displayMetrics.density).toInt()
+            setPadding(padding, padding, padding, padding)
+            addView(input, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(browseButton)
+        }
 
         activeOverlays.addActiveOverlay(EmulatorOverlay.LUA_SCRIPT_DIALOG)
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.run_lua_script)
-            .setView(input)
+            .setView(row)
             .setPositiveButton(R.string.start) { _, _ ->
                 lastLuaScriptPath = input.text.toString()
                 viewModel.startLuaScript(lastLuaScriptPath)
@@ -909,6 +922,45 @@ class EmulatorActivity : AppCompatActivity() {
             .setOnCancelListener {
                 viewModel.resumeEmulator()
             }
+            .show()
+
+        browseButton.setOnClickListener {
+            val root = getExternalFilesDir(null) ?: return@setOnClickListener
+            showLuaScriptFileBrowser(root, root) { path ->
+                input.setText(path)
+            }
+        }
+    }
+
+    // Simple POSIX-path file browser rooted at the app's own private
+    // external-files directory -- deliberately not a SAF/content:// picker,
+    // since Lua scripts need plain filesystem paths for io.*/dofile to work
+    // (see the Lua scripting project memory for why).
+    private fun showLuaScriptFileBrowser(root: File, dir: File, onPicked: (String) -> Unit) {
+        val entries = dir.listFiles()
+            ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+            ?: emptyList()
+        val showUp = dir != root
+        val labels = buildList {
+            if (showUp) add("..")
+            addAll(entries.map { if (it.isDirectory) "${it.name}/" else it.name })
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(dir.path.removePrefix(root.path).ifEmpty { "/" })
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (showUp && which == 0) {
+                    showLuaScriptFileBrowser(root, dir.parentFile ?: root, onPicked)
+                    return@setItems
+                }
+                val entry = entries[if (showUp) which - 1 else which]
+                if (entry.isDirectory) {
+                    showLuaScriptFileBrowser(root, entry, onPicked)
+                } else {
+                    onPicked(entry.absolutePath)
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
             .show()
     }
 

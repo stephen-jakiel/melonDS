@@ -97,6 +97,7 @@ private:
     static int l_stub_emptystring(lua_State* L);
     static int l_stub_false(lua_State* L);
     static int l_stub_emptytable(lua_State* L);
+    static int l_input_getmouse_stub(lua_State* L);
 
     static int l_client_setgameextrapadding(lua_State* L);
     static int l_client_setsoundon(lua_State* L);

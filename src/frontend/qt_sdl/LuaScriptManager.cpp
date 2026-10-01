@@ -112,6 +112,16 @@ void LuaScriptManager::start(const QString& scriptPath)
     if (running.load())
         return;
 
+    // A previous script may have finished on its own (erroring out or
+    // returning naturally sets running=false from inside threadMain())
+    // without anyone calling stop() to join its thread object. Join it now
+    // if so -- returns immediately since the thread function has already
+    // exited -- otherwise the std::thread move-assignment below would be
+    // reassigning over an already-joinable thread, which std::terminate()s
+    // the whole process per the standard.
+    if (scriptThread.joinable())
+        scriptThread.join();
+
     stopRequested.store(false);
     running.store(true);
     frameCount = 0;

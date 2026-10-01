@@ -82,6 +82,16 @@ void LuaScriptManager::start(const std::string& scriptPath)
     if (running.load())
         return;
 
+    // A previous script may have finished on its own (erroring out or
+    // returning naturally sets running=false from inside threadMain())
+    // without anyone calling stop() to join its thread object. Join it now
+    // if so -- returns immediately since the thread function has already
+    // exited -- otherwise the std::thread move-assignment below would be
+    // reassigning over an already-joinable thread, which std::terminate()s
+    // the whole process per the standard.
+    if (scriptThread.joinable())
+        scriptThread.join();
+
     stopRequested.store(false);
     running.store(true);
     frameCount = 0;
@@ -323,10 +333,14 @@ void LuaScriptManager::registerAPI()
     luaL_newlib(L, joypadFuncs);
     lua_setglobal(L, "joypad");
 
-    // input.* (mouse): no pointer device on Android -- stubbed to report
-    // "nothing happening" rather than real touch state for now.
+    // input.* (mouse): no pointer device on Android -- stubbed to report a
+    // neutral "nothing happening" state for now, in the same table shape
+    // BizHawk's API returns (X/Y/Wheel/Left/Middle/Right all present), not
+    // an empty table -- scripts that unconditionally do arithmetic on
+    // e.g. mouse["Y"] (this tracker's Input.lua does) would otherwise
+    // crash on a nil field.
     static const luaL_Reg inputFuncs[] = {
-        {"getmouse", l_stub_emptytable},
+        {"getmouse", l_input_getmouse_stub},
         {nullptr, nullptr}
     };
     luaL_newlib(L, inputFuncs);
@@ -509,6 +523,24 @@ int LuaScriptManager::l_stub_false(lua_State* L)
 int LuaScriptManager::l_stub_emptytable(lua_State* L)
 {
     lua_newtable(L);
+    return 1;
+}
+
+int LuaScriptManager::l_input_getmouse_stub(lua_State* L)
+{
+    lua_newtable(L);
+    lua_pushinteger(L, 0);
+    lua_setfield(L, -2, "X");
+    lua_pushinteger(L, 0);
+    lua_setfield(L, -2, "Y");
+    lua_pushinteger(L, 0);
+    lua_setfield(L, -2, "Wheel");
+    lua_pushboolean(L, false);
+    lua_setfield(L, -2, "Left");
+    lua_pushboolean(L, false);
+    lua_setfield(L, -2, "Middle");
+    lua_pushboolean(L, false);
+    lua_setfield(L, -2, "Right");
     return 1;
 }
 
