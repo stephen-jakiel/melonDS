@@ -83,6 +83,12 @@ void LuaScriptManager::start(const std::string& scriptPath)
     if (running.load())
         return;
 
+    if (scriptPath.empty())
+    {
+        logf("No script path given -- nothing to run");
+        return;
+    }
+
     // A previous script may have finished on its own (erroring out or
     // returning naturally sets running=false from inside threadMain())
     // without anyone calling stop() to join its thread object. Join it now
@@ -92,6 +98,15 @@ void LuaScriptManager::start(const std::string& scriptPath)
     // the whole process per the standard.
     if (scriptThread.joinable())
         scriptThread.join();
+
+    // A previous run may have left a stray post on stepRequested/
+    // stepCompleted that nobody ever consumed (see the matching sem_post in
+    // threadMain()'s cleanup path) -- drain both back to zero so this run
+    // starts from a clean rendezvous state instead of the emulate() loop's
+    // very first waitForStepRequest() spuriously succeeding before the
+    // script has actually asked for a step.
+    while (sem_trywait(&stepRequested) == 0) {}
+    while (sem_trywait(&stepCompleted) == 0) {}
 
     stopRequested.store(false);
     running.store(true);
@@ -190,6 +205,18 @@ void LuaScriptManager::threadMain(std::string scriptPath)
     L = nullptr;
 
     running.store(false);
+
+    // If this script errored out (or its main chunk simply never looped)
+    // before ever calling emu.frameadvance(), the native emulate() thread
+    // could be parked right now in waitForStepRequest() waiting for a step
+    // that will never come -- which would otherwise freeze the entire
+    // emulator, not just the script. Post unconditionally so it wakes up:
+    // isActive() is already false by this point (running just cleared
+    // above), so it falls back to the normal free-running loop instead of
+    // treating this as a real step request. Any post left unconsumed here
+    // (the emulate() thread wasn't actually waiting) is harmless -- the
+    // next start() drains stale posts before launching a new script.
+    sem_post(&stepRequested);
 }
 
 void LuaScriptManager::registerAPI()
