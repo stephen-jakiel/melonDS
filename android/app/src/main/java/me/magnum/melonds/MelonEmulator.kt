@@ -5,6 +5,7 @@ import me.magnum.melonds.common.camera.DSiCameraSource
 import me.magnum.melonds.domain.model.Cheat
 import me.magnum.melonds.domain.model.EmulatorConfiguration
 import me.magnum.melonds.domain.model.Input
+import me.magnum.melonds.domain.model.LuaDrawCommand
 import me.magnum.melonds.domain.model.retroachievements.RASimpleAchievement
 import me.magnum.melonds.domain.model.retroachievements.RASimpleLeaderboard
 import me.magnum.melonds.domain.model.retroachievements.RASimpleRuntimeAchievement
@@ -142,4 +143,8 @@ object MelonEmulator {
     external fun startLuaScript(path: String)
 
     external fun stopLuaScript()
+
+    external fun isLuaScriptActive(): Boolean
+
+    external fun getLuaDrawCommands(): Array<LuaDrawCommand>
 }

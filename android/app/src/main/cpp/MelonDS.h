@@ -6,6 +6,7 @@
 #include "AndroidFileHandler.h"
 #include "AndroidCameraHandler.h"
 #include "Configuration.h"
+#include "LuaScriptManager.h"
 #include "MelonEventMessenger.h"
 #include "RewindManager.h"
 #include "RomGbaSlotConfig.h"
@@ -78,6 +79,7 @@ namespace MelonDSAndroid {
     extern bool isLuaScriptActive();
     extern bool waitForLuaStepRequest();
     extern void signalLuaStepComplete();
+    extern std::vector<LuaDrawCommand> getLuaDrawCommands();
 }
 
 #endif //MELONDS_MELONDS_H

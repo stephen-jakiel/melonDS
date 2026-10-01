@@ -691,6 +691,11 @@ void MelonInstance::signalLuaStepComplete()
     luaScriptManager->signalStepComplete();
 }
 
+std::vector<LuaDrawCommand> MelonInstance::getLuaDrawCommands()
+{
+    return luaScriptManager->getDrawCommands();
+}
+
 void MelonInstance::updateRenderer()
 {
     Renderer newRenderer = currentConfiguration->renderer;

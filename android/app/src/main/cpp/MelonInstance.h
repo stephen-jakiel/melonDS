@@ -79,6 +79,7 @@ public:
     bool isLuaScriptActive();
     bool waitForLuaStepRequest();
     void signalLuaStepComplete();
+    std::vector<LuaDrawCommand> getLuaDrawCommands();
 
 private:
     void updateRenderer();

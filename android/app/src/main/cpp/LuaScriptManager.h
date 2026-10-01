@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <semaphore.h>
 #include <string>
 #include <thread>
@@ -17,6 +18,26 @@ namespace melonDS { class NDS; }
 namespace MelonDSAndroid
 {
 
+// A single gui.draw*() call recorded by the script thread, consumed by
+// Kotlin (via MelonEmulator.getLuaDrawCommands()) when painting the next
+// overlay frame. Coordinates are in NDS-native pixel space (256 wide, top
+// screen y=[0,192), bottom screen y=[192,384)) -- same convention as the
+// desktop build's LuaDrawCommand, just Qt-free (plain packed 0xAARRGGBB
+// colors instead of QColor, std::string/std::vector instead of
+// QString/QRect/QPointF).
+struct LuaDrawCommand
+{
+    enum Kind { Text, Rect, Line, Pixel, Ellipse, Polygon, Image };
+    Kind kind;
+    int x1, y1, x2, y2; // Image: x1,y1=dest pos, x2,y2=dest size (0=natural)
+    uint32_t color = 0;
+    uint32_t fillColor = 0;
+    std::string text; // Text: the string. Image: the file path.
+    std::vector<std::pair<float, float>> points; // Polygon only
+    bool hasSrcRect = false;
+    int srcX = 0, srcY = 0, srcW = 0, srcH = 0; // Image only, source crop region
+};
+
 // Android port of the desktop (qt_sdl) LuaScriptManager -- runs a single
 // BizHawk-API-compatible Lua script (e.g. NDS-Ironmon-Tracker) against this
 // emulator instance, on its own thread, the same frame-advance-driven model
@@ -24,11 +45,12 @@ namespace MelonDSAndroid
 // emu.frameadvance(), once per call).
 //
 // Phase 1 scope: memory.*/emu.*/gameinfo.*/bit.*/console.*/savestate.*/
-// memorysavestate.*/joypad.* are fully implemented. gui.* and forms.* (the
-// on-screen overlay and native-widget UI the tracker's own interface is
-// actually built from) are safe no-op stubs for now -- logged once via
-// logcat, not yet rendered/created. See the project's Lua scripting memory
-// for the planned follow-up phases (GLES overlay compositing, then an
+// memorysavestate.*/joypad.* are fully implemented. Phase 2 adds gui.* (the
+// on-screen overlay) -- drawing happens on the Kotlin side (a Compose
+// Canvas, see LuaOverlayUi.kt) fed by getDrawCommands(), not here; this
+// class only records what the script asked to draw. forms.* (the
+// tracker's actual native-widget UI) is still a safe no-op stub. See the
+// project's Lua scripting memory for the planned follow-up phase (an
 // Android View-based forms.* host).
 class LuaScriptManager
 {
@@ -69,6 +91,10 @@ public:
     // just requested (via MelonDSAndroid::loop()) has actually run.
     void signalStepComplete();
 
+    // Thread-safe: called from Kotlin (via JNI) to pull whatever the script
+    // has drawn since the last emu.frameadvance(). Returns a copy.
+    std::vector<LuaDrawCommand> getDrawCommands();
+
 private:
     void threadMain(std::string scriptPath);
     void registerAPI();
@@ -89,15 +115,30 @@ private:
     static int l_emu_frameadvance(lua_State* L);
     static int l_emu_framecount(lua_State* L);
 
-    // gui.*/forms.*: Phase 1 no-op stubs. Each logs a one-time notice (per
-    // function name) and returns a harmless default so scripts that stash
-    // the "handle" and keep calling methods on it don't crash outright.
+    // forms.*: Phase 1 no-op stubs (gui.* is real as of Phase 2, see below).
+    // Each returns a harmless default so scripts that stash the "handle"
+    // and keep calling methods on it don't crash outright.
     static int l_stub_noop(lua_State* L);
     static int l_stub_zero(lua_State* L);
     static int l_stub_emptystring(lua_State* L);
     static int l_stub_false(lua_State* L);
     static int l_stub_emptytable(lua_State* L);
     static int l_input_getmouse_stub(lua_State* L);
+
+    static int l_gui_drawtext(lua_State* L);
+    static int l_gui_drawrectangle(lua_State* L);
+    static int l_gui_drawline(lua_State* L);
+    static int l_gui_drawpixel(lua_State* L);
+    static int l_gui_drawellipse(lua_State* L);
+    static int l_gui_drawpolygon(lua_State* L);
+    static int l_gui_drawimage(lua_State* L);
+    static int l_gui_drawimageregion(lua_State* L);
+    static int l_gui_clearimagecache(lua_State* L);
+
+    // Parses a BizHawk-style packed 0xAARRGGBB color argument at the given
+    // stack index. Absent/nil is treated the same as alpha 0 (invisible),
+    // matching how scripts use 0x00000000 to mean "don't draw this part."
+    static uint32_t checkColor(lua_State* L, int idx);
 
     static int l_client_setgameextrapadding(lua_State* L);
     static int l_client_setsoundon(lua_State* L);
@@ -168,6 +209,17 @@ private:
     // and the native emulate() thread (producer of step *completions*).
     sem_t stepRequested;
     sem_t stepCompleted;
+
+    // drawCommands accumulates the script's gui.draw*() calls for the frame
+    // currently being stepped into. Right after that frame finishes,
+    // frameadvance() moves it into displayCommands (what getDrawCommands()
+    // returns) and starts drawCommands fresh -- so Kotlin always sees a
+    // complete set from one specific frame. Only swapped when non-empty, so
+    // a script that doesn't redraw every single frame (relying on the
+    // overlay persisting, same as real hardware/BizHawk) doesn't flicker.
+    std::mutex drawMutex;
+    std::vector<LuaDrawCommand> drawCommands;
+    std::vector<LuaDrawCommand> displayCommands;
 };
 
 }

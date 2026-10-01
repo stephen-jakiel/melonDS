@@ -401,6 +401,13 @@ namespace MelonDSAndroid
         instance->signalLuaStepComplete();
     }
 
+    std::vector<LuaDrawCommand> getLuaDrawCommands()
+    {
+        if (!instance)
+            return {};
+        return instance->getLuaDrawCommands();
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)

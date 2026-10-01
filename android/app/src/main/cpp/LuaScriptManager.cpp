@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <unistd.h>
 
@@ -127,6 +128,12 @@ void LuaScriptManager::signalStepComplete()
     sem_post(&stepCompleted);
 }
 
+std::vector<LuaDrawCommand> LuaScriptManager::getDrawCommands()
+{
+    std::lock_guard<std::mutex> lock(drawMutex);
+    return displayCommands;
+}
+
 LuaScriptManager* LuaScriptManager::self(lua_State* L)
 {
     lua_getfield(L, LUA_REGISTRYINDEX, kSelfRegistryKey);
@@ -208,16 +215,18 @@ void LuaScriptManager::registerAPI()
     luaL_newlib(L, emuFuncs);
     lua_setglobal(L, "emu");
 
-    // gui.*/forms.*: Phase 1 no-op stubs (logged once, harmless defaults).
+    // gui.*: real as of Phase 2 -- recorded here, actually rendered on the
+    // Kotlin side (a Compose Canvas fed by getDrawCommands()).
     static const luaL_Reg guiFuncs[] = {
-        {"drawText", l_stub_noop},
-        {"drawRectangle", l_stub_noop},
-        {"drawLine", l_stub_noop},
-        {"drawPixel", l_stub_noop},
-        {"drawPolygon", l_stub_noop},
-        {"drawImage", l_stub_noop},
-        {"drawImageRegion", l_stub_noop},
-        {"clearImageCache", l_stub_noop},
+        {"drawText", l_gui_drawtext},
+        {"drawRectangle", l_gui_drawrectangle},
+        {"drawLine", l_gui_drawline},
+        {"drawPixel", l_gui_drawpixel},
+        {"drawEllipse", l_gui_drawellipse},
+        {"drawPolygon", l_gui_drawpolygon},
+        {"drawImage", l_gui_drawimage},
+        {"drawImageRegion", l_gui_drawimageregion},
+        {"clearImageCache", l_gui_clearimagecache},
         {nullptr, nullptr}
     };
     luaL_newlib(L, guiFuncs);
@@ -484,6 +493,16 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
     sem_wait(&mgr->stepCompleted);
     mgr->frameCount++;
 
+    // The frame this call just produced should show whatever the script
+    // drew (via gui.*) since the *previous* frameadvance() -- publish it
+    // for Kotlin's getDrawCommands() to read, and start collecting fresh.
+    {
+        std::lock_guard<std::mutex> lock(mgr->drawMutex);
+        if (!mgr->drawCommands.empty())
+            mgr->displayCommands = std::move(mgr->drawCommands);
+        mgr->drawCommands.clear();
+    }
+
     if (mgr->stopRequested.load())
         return luaL_error(L, "script stopped");
 
@@ -495,6 +514,172 @@ int LuaScriptManager::l_emu_framecount(lua_State* L)
     LuaScriptManager* mgr = self(L);
     lua_pushinteger(L, (lua_Integer)mgr->frameCount);
     return 1;
+}
+
+uint32_t LuaScriptManager::checkColor(lua_State* L, int idx)
+{
+    if (lua_isnoneornil(L, idx))
+        return 0;
+    // luaL_checknumber (not checkinteger): some callers compute colors via
+    // float arithmetic (e.g. darkening one channel), producing a Lua float
+    // that Lua 5.4's strict luaL_checkinteger would reject outright even
+    // though it's a perfectly good color value once rounded.
+    return (uint32_t)(int64_t)llround(luaL_checknumber(L, idx));
+}
+
+int LuaScriptManager::l_gui_drawtext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Text;
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.text = luaL_checkstring(L, 3);
+    cmd.color = lua_gettop(L) >= 4 ? checkColor(L, 4) : 0xFFFFFFFF;
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawrectangle(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Rect;
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.x2 = (int)checkIntArg(L, 3); // width
+    cmd.y2 = (int)checkIntArg(L, 4); // height
+    cmd.color = checkColor(L, 5);
+    cmd.fillColor = checkColor(L, 6);
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawline(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Line;
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.x2 = (int)checkIntArg(L, 3);
+    cmd.y2 = (int)checkIntArg(L, 4);
+    cmd.color = lua_gettop(L) >= 5 ? checkColor(L, 5) : 0xFFFFFFFF;
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawpixel(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Pixel;
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.color = lua_gettop(L) >= 3 ? checkColor(L, 3) : 0xFFFFFFFF;
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawellipse(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Ellipse;
+    cmd.x1 = (int)checkIntArg(L, 1);
+    cmd.y1 = (int)checkIntArg(L, 2);
+    cmd.x2 = (int)checkIntArg(L, 3);
+    cmd.y2 = (int)checkIntArg(L, 4);
+    cmd.color = checkColor(L, 5);
+    cmd.fillColor = checkColor(L, 6);
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawpolygon(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Polygon;
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_Integer n = lua_rawlen(L, 1);
+    for (lua_Integer i = 1; i <= n; i++)
+    {
+        lua_rawgeti(L, 1, (int)i);
+        if (lua_istable(L, -1))
+        {
+            lua_rawgeti(L, -1, 1);
+            float x = (float)lua_tonumber(L, -1);
+            lua_pop(L, 1);
+            lua_rawgeti(L, -1, 2);
+            float y = (float)lua_tonumber(L, -1);
+            lua_pop(L, 1);
+            cmd.points.emplace_back(x, y);
+        }
+        lua_pop(L, 1);
+    }
+    cmd.color = lua_gettop(L) >= 2 ? checkColor(L, 2) : 0xFFFFFFFF;
+    cmd.fillColor = checkColor(L, 3);
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawimage(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Image;
+    cmd.text = luaL_checkstring(L, 1);
+    cmd.x1 = (int)checkIntArg(L, 2);
+    cmd.y1 = (int)checkIntArg(L, 3);
+    cmd.x2 = (int)optIntArg(L, 4, 0);
+    cmd.y2 = (int)optIntArg(L, 5, 0);
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_drawimageregion(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    LuaDrawCommand cmd;
+    cmd.kind = LuaDrawCommand::Image;
+    cmd.text = luaL_checkstring(L, 1);
+    cmd.hasSrcRect = true;
+    cmd.srcX = (int)checkIntArg(L, 2);
+    cmd.srcY = (int)checkIntArg(L, 3);
+    cmd.srcW = (int)checkIntArg(L, 4);
+    cmd.srcH = (int)checkIntArg(L, 5);
+    cmd.x1 = (int)checkIntArg(L, 6);
+    cmd.y1 = (int)checkIntArg(L, 7);
+    cmd.x2 = (int)optIntArg(L, 8, cmd.srcW);
+    cmd.y2 = (int)optIntArg(L, 9, cmd.srcH);
+
+    std::lock_guard<std::mutex> lock(mgr->drawMutex);
+    mgr->drawCommands.push_back(cmd);
+    return 0;
+}
+
+int LuaScriptManager::l_gui_clearimagecache(lua_State* L)
+{
+    // The actual image cache lives on the Kotlin side (LuaOverlayUi.kt),
+    // keyed by path -- nothing to clear here. Accepted as a no-op so the
+    // script doesn't error calling it.
+    return 0;
 }
 
 int LuaScriptManager::l_stub_noop(lua_State* L)

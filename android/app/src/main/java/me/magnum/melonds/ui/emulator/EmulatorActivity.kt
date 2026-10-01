@@ -49,8 +49,10 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import com.squareup.picasso.Picasso
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import me.magnum.melonds.MelonEmulator
 import me.magnum.melonds.R
@@ -86,6 +88,7 @@ import me.magnum.melonds.ui.emulator.input.FrontendInputHandler
 import me.magnum.melonds.ui.emulator.input.INativeInputListener
 import me.magnum.melonds.ui.emulator.input.InputProcessor
 import me.magnum.melonds.ui.emulator.input.MelonTouchHandler
+import me.magnum.melonds.ui.emulator.lua.LuaOverlayUi
 import me.magnum.melonds.ui.emulator.model.EmulatorOverlay
 import me.magnum.melonds.ui.emulator.model.EmulatorState
 import me.magnum.melonds.ui.emulator.model.EmulatorUiEvent
@@ -275,6 +278,7 @@ class EmulatorActivity : AppCompatActivity() {
     private val rewindWindowState = mutableStateOf<RewindWindowState>(RewindWindowState.Hidden)
     private val showAchievementList = mutableStateOf(false)
     private val showPendingSubmissionsDialog = mutableStateOf(false)
+    private val luaScriptRunning = mutableStateOf(false)
 
     private val activeOverlays = EmulatorOverlayTracker(
         onOverlaysCleared = {
@@ -368,6 +372,8 @@ class EmulatorActivity : AppCompatActivity() {
 
                 AchievementUpdatesUi(viewModel)
 
+                LuaOverlayUi(isScriptRunning = luaScriptRunning.value)
+
                 RewindWindowUi(
                     state = rewindWindowState.value,
                     onRewindSaveStateSelected = { state ->
@@ -406,6 +412,20 @@ class EmulatorActivity : AppCompatActivity() {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 permissionHandler.observePermissionRequests().collect {
                     permissionRequestLauncher.launch(arrayOf(it))
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Mirrors the native script-active flag, so the overlay also
+                // disappears on its own if a script errors out or finishes
+                // without the user explicitly pressing Stop.
+                while (isActive) {
+                    if (luaScriptRunning.value && !MelonEmulator.isLuaScriptActive()) {
+                        luaScriptRunning.value = false
+                    }
+                    delay(1000)
                 }
             }
         }
@@ -907,10 +927,12 @@ class EmulatorActivity : AppCompatActivity() {
             .setPositiveButton(R.string.start) { _, _ ->
                 lastLuaScriptPath = input.text.toString()
                 viewModel.startLuaScript(lastLuaScriptPath)
+                luaScriptRunning.value = true
                 viewModel.resumeEmulator()
             }
             .setNeutralButton(R.string.stop) { _, _ ->
                 viewModel.stopLuaScript()
+                luaScriptRunning.value = false
                 viewModel.resumeEmulator()
             }
             .setNegativeButton(R.string.cancel) { _, _ ->

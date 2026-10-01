@@ -1,0 +1,183 @@
+package me.magnum.melonds.ui.emulator.lua
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.RectF
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import me.magnum.melonds.MelonEmulator
+import me.magnum.melonds.domain.model.LuaDrawCommand
+
+// NDS-native coordinate space the gui.* overlay is drawn in: a standard
+// top-then-bottom dual-screen layout (256 wide, top screen y=[0,192),
+// bottom screen y=[192,384)), same simplification the desktop build makes
+// -- custom/rotated screen layouts aren't accounted for yet.
+private const val NDS_WIDTH = 256f
+private const val NDS_HEIGHT = 384f
+private const val POLL_INTERVAL_MS = 33L // ~30fps, independent of core framerate
+
+/**
+ * Renders a running Lua script's gui.draw*() overlay on top of the game,
+ * with a small toggle button (top-right) to expand/collapse it. Polls
+ * MelonEmulator.getLuaDrawCommands() on a timer rather than being driven by
+ * the emulator's own frame callback, since the overlay only needs to look
+ * smooth to a human, not match the core's exact frame cadence.
+ */
+@Composable
+fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
+    if (!isScriptRunning) {
+        return
+    }
+
+    var expanded by rememberSaveable(isScriptRunning) { mutableStateOf(true) }
+    var commands by remember { mutableStateOf<List<LuaDrawCommand>>(emptyList()) }
+    val imageCache = remember { mutableMapOf<String, Bitmap?>() }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            commands = MelonEmulator.getLuaDrawCommands().asList()
+            delay(POLL_INTERVAL_MS)
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        if (expanded) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawLuaCommands(commands, imageCache)
+            }
+        }
+
+        IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+        ) {
+            Icon(
+                imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = null,
+                tint = Color.White,
+            )
+        }
+    }
+}
+
+private fun Int.hasAlpha() = (this ushr 24) != 0
+
+private fun DrawScope.drawLuaCommands(commands: List<LuaDrawCommand>, imageCache: MutableMap<String, Bitmap?>) {
+    val scale = minOf(size.width / NDS_WIDTH, size.height / NDS_HEIGHT)
+    if (scale <= 0f) return
+    val offsetX = (size.width - NDS_WIDTH * scale) / 2f
+    val offsetY = (size.height - NDS_HEIGHT * scale) / 2f
+
+    drawContext.canvas.nativeCanvas.apply {
+        for (cmd in commands) {
+            when (cmd.kind) {
+                LuaDrawCommand.KIND_TEXT -> {
+                    val paint = Paint().apply {
+                        color = cmd.color
+                        textSize = 14f * scale
+                        isAntiAlias = true
+                    }
+                    drawText(cmd.text, offsetX + cmd.x1 * scale, offsetY + cmd.y1 * scale + paint.textSize, paint)
+                }
+                LuaDrawCommand.KIND_RECT -> {
+                    val left = offsetX + cmd.x1 * scale
+                    val top = offsetY + cmd.y1 * scale
+                    val right = left + cmd.x2 * scale
+                    val bottom = top + cmd.y2 * scale
+                    if (cmd.fillColor.hasAlpha()) {
+                        drawRect(left, top, right, bottom, Paint().apply { color = cmd.fillColor; style = Paint.Style.FILL })
+                    }
+                    if (cmd.color.hasAlpha()) {
+                        drawRect(left, top, right, bottom, Paint().apply { color = cmd.color; style = Paint.Style.STROKE })
+                    }
+                }
+                LuaDrawCommand.KIND_LINE -> {
+                    if (cmd.color.hasAlpha()) {
+                        drawLine(
+                            offsetX + cmd.x1 * scale, offsetY + cmd.y1 * scale,
+                            offsetX + cmd.x2 * scale, offsetY + cmd.y2 * scale,
+                            Paint().apply { color = cmd.color },
+                        )
+                    }
+                }
+                LuaDrawCommand.KIND_PIXEL -> {
+                    if (cmd.color.hasAlpha()) {
+                        drawPoint(offsetX + cmd.x1 * scale, offsetY + cmd.y1 * scale, Paint().apply { color = cmd.color })
+                    }
+                }
+                LuaDrawCommand.KIND_ELLIPSE -> {
+                    val left = offsetX + cmd.x1 * scale
+                    val top = offsetY + cmd.y1 * scale
+                    val right = left + cmd.x2 * scale
+                    val bottom = top + cmd.y2 * scale
+                    if (cmd.fillColor.hasAlpha()) {
+                        drawOval(RectF(left, top, right, bottom), Paint().apply { color = cmd.fillColor; style = Paint.Style.FILL })
+                    }
+                    if (cmd.color.hasAlpha()) {
+                        drawOval(RectF(left, top, right, bottom), Paint().apply { color = cmd.color; style = Paint.Style.STROKE })
+                    }
+                }
+                LuaDrawCommand.KIND_POLYGON -> {
+                    if (cmd.points.size < 4) continue
+                    val path = Path()
+                    path.moveTo(offsetX + cmd.points[0] * scale, offsetY + cmd.points[1] * scale)
+                    var i = 2
+                    while (i + 1 < cmd.points.size) {
+                        path.lineTo(offsetX + cmd.points[i] * scale, offsetY + cmd.points[i + 1] * scale)
+                        i += 2
+                    }
+                    path.close()
+                    if (cmd.fillColor.hasAlpha()) {
+                        drawPath(path, Paint().apply { color = cmd.fillColor; style = Paint.Style.FILL })
+                    }
+                    if (cmd.color.hasAlpha()) {
+                        drawPath(path, Paint().apply { color = cmd.color; style = Paint.Style.STROKE })
+                    }
+                }
+                LuaDrawCommand.KIND_IMAGE -> {
+                    val bitmap = imageCache.getOrPut(cmd.text) {
+                        runCatching { BitmapFactory.decodeFile(cmd.text) }.getOrNull()
+                    } ?: continue
+
+                    val src = if (cmd.hasSrcRect) {
+                        Rect(cmd.srcX, cmd.srcY, cmd.srcX + cmd.srcW, cmd.srcY + cmd.srcH)
+                    } else {
+                        Rect(0, 0, bitmap.width, bitmap.height)
+                    }
+                    val dw = if (cmd.x2 > 0) cmd.x2 else src.width()
+                    val dh = if (cmd.y2 > 0) cmd.y2 else src.height()
+                    val dst = RectF(
+                        offsetX + cmd.x1 * scale, offsetY + cmd.y1 * scale,
+                        offsetX + (cmd.x1 + dw) * scale, offsetY + (cmd.y1 + dh) * scale,
+                    )
+                    drawBitmap(bitmap, src, dst, null)
+                }
+            }
+        }
+    }
+}
