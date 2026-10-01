@@ -37,6 +37,7 @@ add_library(
         ${ANDROID-CPP}/EmulatorArgsBuilder.cpp
         ${ANDROID-CPP}/EmulatorMessageQueueJNI.cpp
         ${ANDROID-CPP}/JniEnvHandler.cpp
+        ${ANDROID-CPP}/LuaScriptManager.cpp
         ${ANDROID-CPP}/MelonDS.cpp
         ${ANDROID-CPP}/MelonDSAndroidCameraHandler.cpp
         ${ANDROID-CPP}/MelonDSAndroidConfiguration.cpp
@@ -74,4 +75,4 @@ target_include_directories(melonDS-android-frontend PUBLIC
         ${FAAD2}/include
         ${RCHEEVOS}/include
 )
-target_link_libraries(melonDS-android-frontend android core net-utils oboe faad enet rcheevos EGL GLESv3)
+target_link_libraries(melonDS-android-frontend android core net-utils oboe faad enet rcheevos lua EGL GLESv3 log)

@@ -79,6 +79,7 @@ MelonInstance::MelonInstance(int instanceId, std::shared_ptr<EmulatorConfigurati
 
     // All instances have a RetroAchievements manager, but only the first instance will actually load achievements
     retroAchievementsManager = std::make_unique<RetroAchievements::RetroAchievementsManager>(nds);
+    luaScriptManager = std::make_unique<LuaScriptManager>(nds, &inputMask);
 
     nds->Reset();
     setBatteryLevels();
@@ -663,6 +664,31 @@ std::vector<RetroAchievements::RARuntimeAchievement> MelonInstance::getRuntimeAc
         return retroAchievementsManager->GetRuntimeAchievements();
     else
         return { };
+}
+
+void MelonInstance::startLuaScript(const std::string& path)
+{
+    luaScriptManager->start(path);
+}
+
+void MelonInstance::stopLuaScript()
+{
+    luaScriptManager->stop();
+}
+
+bool MelonInstance::isLuaScriptActive()
+{
+    return luaScriptManager->isActive();
+}
+
+bool MelonInstance::waitForLuaStepRequest()
+{
+    return luaScriptManager->waitForStepRequest();
+}
+
+void MelonInstance::signalLuaStepComplete()
+{
+    luaScriptManager->signalStepComplete();
 }
 
 void MelonInstance::updateRenderer()

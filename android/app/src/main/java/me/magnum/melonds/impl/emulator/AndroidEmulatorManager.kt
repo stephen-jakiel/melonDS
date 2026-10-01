@@ -228,6 +228,14 @@ class AndroidEmulatorManager(
         return achievementsSharedFlow.asSharedFlow()
     }
 
+    override fun startLuaScript(path: String) {
+        MelonEmulator.startLuaScript(path)
+    }
+
+    override fun stopLuaScript() {
+        MelonEmulator.stopLuaScript()
+    }
+
     private fun setupEmulator(emulatorConfiguration: EmulatorConfiguration) {
         MelonEmulator.setupEmulator(
             emulatorConfiguration = emulatorConfiguration,

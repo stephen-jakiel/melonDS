@@ -377,6 +377,14 @@ class EmulatorViewModel @Inject constructor(
         }
     }
 
+    fun startLuaScript(path: String) {
+        emulatorManager.startLuaScript(path)
+    }
+
+    fun stopLuaScript() {
+        emulatorManager.stopLuaScript()
+    }
+
     fun resetEmulator() {
         if (_emulatorState.value.isRunning()) {
             sessionCoroutineScope.launch {
@@ -453,6 +461,7 @@ class EmulatorViewModel @Inject constructor(
                         }
                     }
                     RomPauseMenuOption.VIEW_ACHIEVEMENTS -> _uiEvent.tryEmit(EmulatorUiEvent.ShowAchievementList)
+                    RomPauseMenuOption.RUN_LUA_SCRIPT -> _uiEvent.tryEmit(EmulatorUiEvent.ShowLuaScriptDialog)
                     RomPauseMenuOption.RESET -> resetEmulator()
                     RomPauseMenuOption.EXIT -> exitEmulator(force = false)
                 }

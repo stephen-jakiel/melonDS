@@ -72,6 +72,12 @@ namespace MelonDSAndroid {
     extern bool takeScreenshot();
     extern void stop();
     extern void cleanup();
+
+    extern void startLuaScript(std::string path);
+    extern void stopLuaScript();
+    extern bool isLuaScriptActive();
+    extern bool waitForLuaStepRequest();
+    extern void signalLuaStepComplete();
 }
 
 #endif //MELONDS_MELONDS_H

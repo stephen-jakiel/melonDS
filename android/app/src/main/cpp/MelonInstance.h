@@ -7,6 +7,7 @@
 #include "Configuration.h"
 #include "NDS.h"
 #include "MelonDS.h"
+#include "LuaScriptManager.h"
 #include "SaveManager.h"
 #include "RewindManager.h"
 #include "renderer/FrameQueue.h"
@@ -73,6 +74,12 @@ public:
     std::string getRichPresenceStatus();
     std::vector<RetroAchievements::RARuntimeAchievement> getRuntimeAchievements();
 
+    void startLuaScript(const std::string& path);
+    void stopLuaScript();
+    bool isLuaScriptActive();
+    bool waitForLuaStepRequest();
+    void signalLuaStepComplete();
+
 private:
     void updateRenderer();
     void setBatteryLevels();
@@ -88,6 +95,7 @@ private:
     std::atomic<float> motionData[6] = { 0.0f, 0.0f, 9.80665f, 0.0f, 0.0f, 0.0f };
 
     std::unique_ptr<RetroAchievements::RetroAchievementsManager> retroAchievementsManager;
+    std::unique_ptr<LuaScriptManager> luaScriptManager;
     std::unique_ptr<SaveManager> ndsSave;
     std::unique_ptr<SaveManager> gbaSave;
     std::unique_ptr<SaveManager> firmwareSave;

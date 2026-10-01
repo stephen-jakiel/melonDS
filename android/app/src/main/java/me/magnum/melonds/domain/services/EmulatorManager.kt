@@ -51,5 +51,9 @@ interface EmulatorManager {
 
     fun cleanEmulator()
 
+    fun startLuaScript(path: String)
+
+    fun stopLuaScript()
+
     fun observeRetroAchievementEvents(): Flow<RAEvent>
 }

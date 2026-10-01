@@ -452,8 +452,28 @@ Java_me_magnum_melonds_MelonEmulator_getRewindWindow(JNIEnv* env, jobject thiz) 
 }
 
 JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_startLuaScript(JNIEnv* env, jobject thiz, jstring path)
+{
+    const char* scriptPath = env->GetStringUTFChars(path, nullptr);
+    MelonDSAndroid::startLuaScript(std::string(scriptPath));
+    env->ReleaseStringUTFChars(path, scriptPath);
+}
+
+JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_stopLuaScript(JNIEnv* env, jobject thiz)
+{
+    MelonDSAndroid::stopLuaScript();
+}
+
+JNIEXPORT void JNICALL
 Java_me_magnum_melonds_MelonEmulator_stopEmulation(JNIEnv* env, jobject thiz)
 {
+    // Tear down any running Lua script first: it drives the emulate()
+    // thread's frame-stepping via a semaphore rendezvous that the ordinary
+    // stop/join below doesn't know how to wake, so leaving one running
+    // here would hang pthread_join() forever.
+    MelonDSAndroid::stopLuaScript();
+
     if (started)
     {
         pthread_mutex_lock(&emuThreadMutex);
@@ -645,6 +665,22 @@ void* emulate(void*)
         }
 
         pthread_mutex_unlock(&emuThreadMutex);
+
+        if (MelonDSAndroid::isLuaScriptActive())
+        {
+            // Hand frame-stepping control over to the script for as long as
+            // it's running: block here until it calls emu.frameadvance()
+            // (instead of free-running at our own pace), run exactly the
+            // one frame it asked for, and signal it back. Skip the normal
+            // FPS pacing/sleep below entirely -- the script alone drives
+            // how fast frames go by, same model as the desktop build.
+            if (!MelonDSAndroid::waitForLuaStepRequest())
+                continue; // script stopped while we were waiting; re-check pause/stop above
+
+            MelonDSAndroid::loop();
+            MelonDSAndroid::signalLuaStepComplete();
+            continue;
+        }
 
         auto frameStart = std::chrono::steady_clock::now();
 

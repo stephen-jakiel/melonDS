@@ -148,6 +148,10 @@
 
     <string name="pause">Pause</string>
     <string name="achievements">Achievements</string>
+    <string name="run_lua_script">Lua Script…</string>
+    <string name="lua_script_path_hint">Script path (e.g. /storage/emulated/0/Android/data/me.magnum.melonds/files/NDS-Ironmon-Tracker/Ironmon-Tracker.lua)</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
     <string name="reset">Reset</string>
     <string name="exit">Exit</string>
 

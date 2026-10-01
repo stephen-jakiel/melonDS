@@ -374,6 +374,33 @@ namespace MelonDSAndroid
         eventMessenger = nullptr;
     }
 
+    void startLuaScript(std::string path)
+    {
+        if (instance)
+            instance->startLuaScript(path);
+    }
+
+    void stopLuaScript()
+    {
+        if (instance)
+            instance->stopLuaScript();
+    }
+
+    bool isLuaScriptActive()
+    {
+        return instance && instance->isLuaScriptActive();
+    }
+
+    bool waitForLuaStepRequest()
+    {
+        return instance->waitForLuaStepRequest();
+    }
+
+    void signalLuaStepComplete()
+    {
+        instance->signalLuaStepComplete();
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)

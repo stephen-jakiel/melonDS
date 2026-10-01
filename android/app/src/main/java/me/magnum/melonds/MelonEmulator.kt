@@ -138,4 +138,8 @@ object MelonEmulator {
     external fun updateEmulatorConfiguration(emulatorConfiguration: EmulatorConfiguration)
 
     external fun updateMotionData(ax: Float, ay: Float, az: Float, rx: Float, ry: Float, rz: Float)
+
+    external fun startLuaScript(path: String)
+
+    external fun stopLuaScript()
 }

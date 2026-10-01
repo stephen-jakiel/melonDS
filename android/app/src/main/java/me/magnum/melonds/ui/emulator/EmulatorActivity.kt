@@ -15,6 +15,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -165,6 +166,7 @@ class EmulatorActivity : AppCompatActivity() {
     lateinit var appForegroundStateObserver: AppForegroundStateObserver
 
     private var presentation: ExternalPresentation? = null
+    private var lastLuaScriptPath: String = ""
 
     private lateinit var handler: Handler
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -525,6 +527,7 @@ class EmulatorActivity : AppCompatActivity() {
                             activeOverlays.addActiveOverlay(EmulatorOverlay.PENDING_SUBMISSION_CONFIRM_EXIT)
                             showPendingSubmissionsDialog.value = true
                         }
+                        EmulatorUiEvent.ShowLuaScriptDialog -> showLuaScriptDialog()
                     }
                 }
             }
@@ -876,6 +879,37 @@ class EmulatorActivity : AppCompatActivity() {
                     viewModel.resumeEmulator()
                 }
                 .show()
+    }
+
+    private fun showLuaScriptDialog() {
+        val input = EditText(this).apply {
+            hint = getString(R.string.lua_script_path_hint)
+            setText(lastLuaScriptPath)
+        }
+
+        activeOverlays.addActiveOverlay(EmulatorOverlay.LUA_SCRIPT_DIALOG)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.run_lua_script)
+            .setView(input)
+            .setPositiveButton(R.string.start) { _, _ ->
+                lastLuaScriptPath = input.text.toString()
+                viewModel.startLuaScript(lastLuaScriptPath)
+                viewModel.resumeEmulator()
+            }
+            .setNeutralButton(R.string.stop) { _, _ ->
+                viewModel.stopLuaScript()
+                viewModel.resumeEmulator()
+            }
+            .setNegativeButton(R.string.cancel) { _, _ ->
+                viewModel.resumeEmulator()
+            }
+            .setOnDismissListener {
+                activeOverlays.removeActiveOverlay(EmulatorOverlay.LUA_SCRIPT_DIALOG)
+            }
+            .setOnCancelListener {
+                viewModel.resumeEmulator()
+            }
+            .show()
     }
 
     private fun disableScreenTimeOut() {
