@@ -117,6 +117,7 @@ dependencies {
     implementation(projects.masterswitch)
     implementation(projects.rcheevosApi)
     implementation(projects.common)
+    implementation(projects.randomizerCore)
 
     implementation(libs.androidx.activity)
     implementation(libs.androidx.activity.compose)
