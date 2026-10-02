@@ -7,9 +7,14 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.icons.Icons
@@ -27,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -73,18 +79,30 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
 
     Box(modifier = modifier.fillMaxSize()) {
         if (expanded) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val (padLeft, padTop, padRight, padBottom) = padding
                 val totalWidth = NDS_WIDTH + padLeft + padRight
                 val totalHeight = NDS_HEIGHT + padTop + padBottom
-                val scale = minOf(size.width / totalWidth, size.height / totalHeight)
-                if (scale > 0f) {
-                    // The game screen's own (0,0) still needs to land where
-                    // it visually is -- shift by the left/top padding so
-                    // extra space appears around it, not shrinking it.
-                    val offsetX = (size.width - totalWidth * scale) / 2f + padLeft * scale
-                    val offsetY = (size.height - totalHeight * scale) / 2f + padTop * scale
-                    drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
+
+                // Scale for height only, not "fit everything in view": this
+                // tracker's extra padding (e.g. 199px for its stats panel)
+                // assumes a wide desktop window, which a portrait phone
+                // screen doesn't have -- fitting the full padded width would
+                // shrink the whole overlay (game area included) down to a
+                // cramped, barely-readable size. Scaling for height instead
+                // keeps content a sensible size and lets the padded area
+                // extend past the screen edge, reachable by scrolling.
+                val density = LocalDensity.current
+                val availableHeightPx = with(density) { maxHeight.toPx() }
+                val scale = if (totalHeight > 0f) availableHeightPx / totalHeight else 1f
+                val canvasWidthDp = with(density) { (totalWidth * scale).toDp() }
+
+                Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    Canvas(modifier = Modifier.width(canvasWidthDp).fillMaxHeight()) {
+                        val offsetX = padLeft * scale
+                        val offsetY = padTop * scale
+                        drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
+                    }
                 }
             }
         }
