@@ -81,6 +81,12 @@ public:
     void signalLuaStepComplete();
     std::vector<LuaDrawCommand> getLuaDrawCommands();
 
+    std::optional<FormsRequest> pollLuaFormsRequest();
+    void deliverLuaFormsResult(FormsResult result);
+    std::vector<FormsRequest> takeLuaFormsCommands();
+    void notifyLuaFormsClick(int handle);
+    void notifyLuaFormsFormClosed(int handle);
+
 private:
     void updateRenderer();
     void setBatteryLevels();

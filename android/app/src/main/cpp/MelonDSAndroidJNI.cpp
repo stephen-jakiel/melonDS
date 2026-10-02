@@ -515,6 +515,89 @@ Java_me_magnum_melonds_MelonEmulator_getLuaDrawCommands(JNIEnv* env, jobject thi
     return result;
 }
 
+static jobject buildLuaFormsRequestObject(JNIEnv* env, jclass cls, jmethodID ctor, const MelonDSAndroid::FormsRequest& req)
+{
+    jstring text = env->NewStringUTF(req.text.c_str());
+    jstring text2 = env->NewStringUTF(req.text2.c_str());
+
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray items = env->NewObjectArray((jsize) req.items.size(), stringClass, nullptr);
+    for (size_t i = 0; i < req.items.size(); i++)
+    {
+        jstring item = env->NewStringUTF(req.items[i].c_str());
+        env->SetObjectArrayElement(items, (jsize) i, item);
+        env->DeleteLocalRef(item);
+    }
+
+    jobject obj = env->NewObject(cls, ctor,
+        (jint) req.op, (jint) req.handle, (jint) req.x, (jint) req.y, (jint) req.w, (jint) req.h,
+        (jint) req.color, (jint) req.fillColor, text, text2, items, (jboolean) req.boolArg);
+
+    env->DeleteLocalRef(stringClass);
+    env->DeleteLocalRef(items);
+    env->DeleteLocalRef(text2);
+    env->DeleteLocalRef(text);
+    return obj;
+}
+
+JNIEXPORT jobject JNICALL
+Java_me_magnum_melonds_MelonEmulator_pollLuaFormsRequest(JNIEnv* env, jobject thiz)
+{
+    std::optional<MelonDSAndroid::FormsRequest> req = MelonDSAndroid::pollLuaFormsRequest();
+    if (!req.has_value())
+        return nullptr;
+
+    jclass reqClass = env->FindClass("me/magnum/melonds/domain/model/LuaFormsRequest");
+    jmethodID ctor = env->GetMethodID(reqClass, "<init>", "(IIIIIIIILjava/lang/String;Ljava/lang/String;[Ljava/lang/String;Z)V");
+    jobject obj = buildLuaFormsRequestObject(env, reqClass, ctor, *req);
+    env->DeleteLocalRef(reqClass);
+    return obj;
+}
+
+JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_deliverLuaFormsResult(JNIEnv* env, jobject thiz, jint intResult, jstring stringResult, jboolean boolResult)
+{
+    MelonDSAndroid::FormsResult result;
+    result.intResult = intResult;
+    result.boolResult = boolResult;
+    const char* s = env->GetStringUTFChars(stringResult, nullptr);
+    result.stringResult = s;
+    env->ReleaseStringUTFChars(stringResult, s);
+    MelonDSAndroid::deliverLuaFormsResult(result);
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_me_magnum_melonds_MelonEmulator_takeLuaFormsCommands(JNIEnv* env, jobject thiz)
+{
+    std::vector<MelonDSAndroid::FormsRequest> commands = MelonDSAndroid::takeLuaFormsCommands();
+
+    jclass reqClass = env->FindClass("me/magnum/melonds/domain/model/LuaFormsRequest");
+    jmethodID ctor = env->GetMethodID(reqClass, "<init>", "(IIIIIIIILjava/lang/String;Ljava/lang/String;[Ljava/lang/String;Z)V");
+
+    jobjectArray result = env->NewObjectArray((jsize) commands.size(), reqClass, nullptr);
+    for (size_t i = 0; i < commands.size(); i++)
+    {
+        jobject obj = buildLuaFormsRequestObject(env, reqClass, ctor, commands[i]);
+        env->SetObjectArrayElement(result, (jsize) i, obj);
+        env->DeleteLocalRef(obj);
+    }
+
+    env->DeleteLocalRef(reqClass);
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_notifyLuaFormsClick(JNIEnv* env, jobject thiz, jint handle)
+{
+    MelonDSAndroid::notifyLuaFormsClick(handle);
+}
+
+JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_notifyLuaFormsFormClosed(JNIEnv* env, jobject thiz, jint handle)
+{
+    MelonDSAndroid::notifyLuaFormsFormClosed(handle);
+}
+
 JNIEXPORT void JNICALL
 Java_me_magnum_melonds_MelonEmulator_stopEmulation(JNIEnv* env, jobject thiz)
 {

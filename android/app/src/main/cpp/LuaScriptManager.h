@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <semaphore.h>
 #include <string>
 #include <thread>
@@ -38,20 +39,76 @@ struct LuaDrawCommand
     int srcX = 0, srcY = 0, srcW = 0, srcH = 0; // Image only, source crop region
 };
 
+// forms.*: unlike gui.* (which only ever accumulates draw commands onto the
+// main screen overlay), forms.* creates and queries actual Kotlin-side
+// Compose UI state (windows, buttons, text fields, ...) that only the main
+// thread can touch -- so every operation has to cross into Kotlin somehow.
+// Split into two channels based on whether the script needs a value back
+// *before* it can continue (creating a widget, reading text/checked state):
+//
+//   - Blocking ops (creation + getters): exactly one in flight at a time is
+//     ever possible (every forms.* call comes from the single script
+//     thread), so a single-slot "mailbox" plus a semaphore is enough --
+//     Kotlin polls pollFormsRequest(), does the work on the UI thread, and
+//     calls deliverFormsResult() to hand the result back and wake the
+//     script thread. See FormsOp below for which ops these are.
+//   - Fire-and-forget ops (mutations, forms.* picturebox drawing): queued
+//     via takeFormsCommands(), drained by Kotlin each poll tick with no
+//     result expected and no blocking -- these can happen as often as a
+//     script likes (e.g. updating a label's text every frame) without
+//     paying a round-trip each time.
+//
+// Button clicks and a form's close ("X") button go the other direction
+// (Kotlin -> native): notifyFormsClick()/notifyFormsFormClosed() look up
+// the Lua callback ref registered for that handle (if any) and queue it
+// for dispatchFormsCallbacks() to actually invoke, from the script thread,
+// once per emu.frameadvance() -- the same model as desktop's
+// LuaFormsManager::takePendingCallbacks().
+enum class FormsOp
+{
+    // Blocking: creation (returns a new handle in intResult)
+    NewForm, Button, Label, Checkbox, Textbox, Dropdown, PictureBox,
+    // Blocking: getters
+    GetText, IsChecked, GetMouseX, GetMouseY, OpenFile,
+    // Fire-and-forget: mutations
+    SetDropdownItems, SetProperty, SetLocation, SetText, Destroy, DestroyAll,
+    // Fire-and-forget: picturebox drawing (handle = the picturebox's own handle)
+    DrawText, DrawRectangle, DrawEllipse, DrawImage, Clear, Refresh,
+};
+
+struct FormsRequest
+{
+    FormsOp op;
+    int handle = 0; // target widget/form handle; 0 for ops that create one
+    int x = 0, y = 0, w = 0, h = 0;
+    uint32_t color = 0, fillColor = 0;
+    std::string text;  // caption/text/propName/path/filter/title
+    std::string text2; // propValue, or a second string arg
+    std::vector<std::string> items; // dropdown items
+    bool boolArg = false; // textbox multiline
+};
+
+struct FormsResult
+{
+    int intResult = 0;
+    std::string stringResult;
+    bool boolResult = false;
+};
+
 // Android port of the desktop (qt_sdl) LuaScriptManager -- runs a single
 // BizHawk-API-compatible Lua script (e.g. NDS-Ironmon-Tracker) against this
 // emulator instance, on its own thread, the same frame-advance-driven model
 // as the desktop build (the script alone drives frame progression via
 // emu.frameadvance(), once per call).
 //
-// Phase 1 scope: memory.*/emu.*/gameinfo.*/bit.*/console.*/savestate.*/
-// memorysavestate.*/joypad.* are fully implemented. Phase 2 adds gui.* (the
-// on-screen overlay) -- drawing happens on the Kotlin side (a Compose
-// Canvas, see LuaOverlayUi.kt) fed by getDrawCommands(), not here; this
-// class only records what the script asked to draw. forms.* (the
-// tracker's actual native-widget UI) is still a safe no-op stub. See the
-// project's Lua scripting memory for the planned follow-up phase (an
-// Android View-based forms.* host).
+// Phase 1: memory.*/emu.*/gameinfo.*/bit.*/console.*/savestate.*/
+// memorysavestate.*/joypad.*. Phase 2: gui.* (the on-screen overlay --
+// drawing happens on the Kotlin side, a Compose Canvas, see
+// LuaOverlayUi.kt). Phase 3: forms.* (the tracker's actual native-widget
+// UI) -- also rendered on the Kotlin side (LuaFormsOverlayUi.kt), as
+// Compose panels/widgets rather than real separate OS windows (Android
+// apps can't normally create those); see the FormsOp/FormsRequest
+// declarations above for how the cross-thread bridge works.
 class LuaScriptManager
 {
 public:
@@ -95,6 +152,23 @@ public:
     // has drawn since the last emu.frameadvance(). Returns a copy.
     std::vector<LuaDrawCommand> getDrawCommands();
 
+    // --- forms.* bridge: all called from Kotlin (any thread calling into
+    // native from Kotlin is always the main/Compose thread in practice) ---
+
+    // Consumes the one in-flight blocking request, if any (clears it so it
+    // isn't delivered twice).
+    std::optional<FormsRequest> pollFormsRequest();
+    // Hands the result of the request pollFormsRequest() just returned back
+    // to the script thread, which is blocked waiting for exactly this.
+    void deliverFormsResult(FormsResult result);
+    // Drains all fire-and-forget commands queued since the last call.
+    std::vector<FormsRequest> takeFormsCommands();
+    // A button (handle) was clicked, or a form (handle)'s close button was
+    // pressed -- queues the registered Lua callback ref, if any, for
+    // dispatchFormsCallbacks() to invoke from the script thread.
+    void notifyFormsClick(int handle);
+    void notifyFormsFormClosed(int handle);
+
 private:
     void threadMain(std::string scriptPath);
     void registerAPI();
@@ -115,15 +189,51 @@ private:
     static int l_emu_frameadvance(lua_State* L);
     static int l_emu_framecount(lua_State* L);
 
-    // forms.*: Phase 1 no-op stubs (gui.* is real as of Phase 2, see below).
-    // Each returns a harmless default so scripts that stash the "handle"
-    // and keep calling methods on it don't crash outright.
-    static int l_stub_noop(lua_State* L);
-    static int l_stub_zero(lua_State* L);
-    static int l_stub_emptystring(lua_State* L);
-    static int l_stub_false(lua_State* L);
-    static int l_stub_emptytable(lua_State* L);
     static int l_input_getmouse_stub(lua_State* L);
+
+    static int l_forms_newform(lua_State* L);
+    static int l_forms_button(lua_State* L);
+    static int l_forms_label(lua_State* L);
+    static int l_forms_checkbox(lua_State* L);
+    static int l_forms_textbox(lua_State* L);
+    static int l_forms_dropdown(lua_State* L);
+    static int l_forms_setdropdownitems(lua_State* L);
+    static int l_forms_picturebox(lua_State* L);
+    static int l_forms_setproperty(lua_State* L);
+    static int l_forms_setlocation(lua_State* L);
+    static int l_forms_settext(lua_State* L);
+    static int l_forms_gettext(lua_State* L);
+    static int l_forms_ischecked(lua_State* L);
+    static int l_forms_destroy(lua_State* L);
+    static int l_forms_destroyall(lua_State* L);
+    static int l_forms_addclick(lua_State* L);
+    static int l_forms_getmousex(lua_State* L);
+    static int l_forms_getmousey(lua_State* L);
+    static int l_forms_openfile(lua_State* L);
+    static int l_forms_drawtext(lua_State* L);
+    static int l_forms_drawrectangle(lua_State* L);
+    static int l_forms_drawellipse(lua_State* L);
+    static int l_forms_drawimage(lua_State* L);
+    static int l_forms_clear(lua_State* L);
+    static int l_forms_refresh(lua_State* L);
+
+    // Blocks until Kotlin delivers a result for req (see pollFormsRequest/
+    // deliverFormsResult above).
+    FormsResult callFormsBridge(FormsRequest req);
+    // Fire-and-forget: queues req for Kotlin to pick up next poll, no wait.
+    void queueFormsCommand(const FormsRequest& req);
+    // Pops a function argument (if present) into the Lua registry so it can
+    // be invoked later from dispatchFormsCallbacks(); returns 0 (an invalid
+    // ref) for a missing/nil argument.
+    static int refFunctionArg(lua_State* L, int idx);
+    // Accepts either a plain array table ({"a","b"}) or an associative one
+    // ({[key]=val, ...}), matching how the tracker calls forms.dropdown/
+    // forms.setdropdownitems both ways in practice.
+    static std::vector<std::string> checkStringList(lua_State* L, int idx);
+    // Invokes every Lua callback (button clicks, form close) queued since
+    // the last call. Must only run on the script thread; called once per
+    // emu.frameadvance().
+    void dispatchFormsCallbacks();
 
     static int l_gui_drawtext(lua_State* L);
     static int l_gui_drawrectangle(lua_State* L);
@@ -220,6 +330,20 @@ private:
     std::mutex drawMutex;
     std::vector<LuaDrawCommand> drawCommands;
     std::vector<LuaDrawCommand> displayCommands;
+
+    // forms.* bridge state -- see the FormsOp/FormsRequest comment above.
+    std::mutex formsBridgeMutex;
+    std::optional<FormsRequest> pendingFormsRequest;
+    sem_t formsResultReady;
+    FormsResult formsResult;
+
+    std::mutex formsCommandsMutex;
+    std::vector<FormsRequest> formsCommands;
+
+    std::mutex formsCallbackMutex;
+    std::map<int, int> formsClickRefs;              // widget handle -> Lua ref
+    std::map<int, int> formsCloseRefs;               // form handle -> Lua ref
+    std::vector<int> pendingFormsCallbackRefs;       // refs ready to invoke
 };
 
 }

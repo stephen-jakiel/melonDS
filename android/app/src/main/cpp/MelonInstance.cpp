@@ -696,6 +696,31 @@ std::vector<LuaDrawCommand> MelonInstance::getLuaDrawCommands()
     return luaScriptManager->getDrawCommands();
 }
 
+std::optional<FormsRequest> MelonInstance::pollLuaFormsRequest()
+{
+    return luaScriptManager->pollFormsRequest();
+}
+
+void MelonInstance::deliverLuaFormsResult(FormsResult result)
+{
+    luaScriptManager->deliverFormsResult(std::move(result));
+}
+
+std::vector<FormsRequest> MelonInstance::takeLuaFormsCommands()
+{
+    return luaScriptManager->takeFormsCommands();
+}
+
+void MelonInstance::notifyLuaFormsClick(int handle)
+{
+    luaScriptManager->notifyFormsClick(handle);
+}
+
+void MelonInstance::notifyLuaFormsFormClosed(int handle)
+{
+    luaScriptManager->notifyFormsFormClosed(handle);
+}
+
 void MelonInstance::updateRenderer()
 {
     Renderer newRenderer = currentConfiguration->renderer;

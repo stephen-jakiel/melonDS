@@ -408,6 +408,38 @@ namespace MelonDSAndroid
         return instance->getLuaDrawCommands();
     }
 
+    std::optional<FormsRequest> pollLuaFormsRequest()
+    {
+        if (!instance)
+            return std::nullopt;
+        return instance->pollLuaFormsRequest();
+    }
+
+    void deliverLuaFormsResult(FormsResult result)
+    {
+        if (instance)
+            instance->deliverLuaFormsResult(std::move(result));
+    }
+
+    std::vector<FormsRequest> takeLuaFormsCommands()
+    {
+        if (!instance)
+            return {};
+        return instance->takeLuaFormsCommands();
+    }
+
+    void notifyLuaFormsClick(int handle)
+    {
+        if (instance)
+            instance->notifyLuaFormsClick(handle);
+    }
+
+    void notifyLuaFormsFormClosed(int handle)
+    {
+        if (instance)
+            instance->notifyLuaFormsFormClosed(handle);
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)

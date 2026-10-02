@@ -68,7 +68,12 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
         if (expanded) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                drawLuaCommands(commands, imageCache)
+                val scale = minOf(size.width / NDS_WIDTH, size.height / NDS_HEIGHT)
+                if (scale > 0f) {
+                    val offsetX = (size.width - NDS_WIDTH * scale) / 2f
+                    val offsetY = (size.height - NDS_HEIGHT * scale) / 2f
+                    drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
+                }
             }
         }
 
@@ -87,12 +92,11 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
 
 private fun Int.hasAlpha() = (this ushr 24) != 0
 
-private fun DrawScope.drawLuaCommands(commands: List<LuaDrawCommand>, imageCache: MutableMap<String, Bitmap?>) {
-    val scale = minOf(size.width / NDS_WIDTH, size.height / NDS_HEIGHT)
-    if (scale <= 0f) return
-    val offsetX = (size.width - NDS_WIDTH * scale) / 2f
-    val offsetY = (size.height - NDS_HEIGHT * scale) / 2f
-
+// Shared by the gui.* screen overlay (scaled/letterboxed to fit the NDS's
+// 256x384 native space) and forms.pictureBox content (offsetX=offsetY=0,
+// scale=1 -- picturebox coordinates are already plain, unscaled pixels
+// within its own bounds), so both stay visually consistent.
+fun DrawScope.drawLuaCommandsAt(commands: List<LuaDrawCommand>, imageCache: MutableMap<String, Bitmap?>, offsetX: Float, offsetY: Float, scale: Float) {
     drawContext.canvas.nativeCanvas.apply {
         for (cmd in commands) {
             when (cmd.kind) {

@@ -88,6 +88,7 @@ import me.magnum.melonds.ui.emulator.input.FrontendInputHandler
 import me.magnum.melonds.ui.emulator.input.INativeInputListener
 import me.magnum.melonds.ui.emulator.input.InputProcessor
 import me.magnum.melonds.ui.emulator.input.MelonTouchHandler
+import me.magnum.melonds.ui.emulator.lua.LuaFormsOverlayUi
 import me.magnum.melonds.ui.emulator.lua.LuaOverlayUi
 import me.magnum.melonds.ui.emulator.model.EmulatorOverlay
 import me.magnum.melonds.ui.emulator.model.EmulatorState
@@ -383,6 +384,8 @@ class EmulatorActivity : AppCompatActivity() {
                 PauseMenuButtonUi(onClick = { viewModel.pauseEmulator(true) })
 
                 LuaOverlayUi(isScriptRunning = luaScriptRunning.value)
+
+                LuaFormsOverlayUi(isScriptRunning = luaScriptRunning.value)
 
                 RewindWindowUi(
                     state = rewindWindowState.value,

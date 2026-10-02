@@ -80,6 +80,12 @@ namespace MelonDSAndroid {
     extern bool waitForLuaStepRequest();
     extern void signalLuaStepComplete();
     extern std::vector<LuaDrawCommand> getLuaDrawCommands();
+
+    extern std::optional<FormsRequest> pollLuaFormsRequest();
+    extern void deliverLuaFormsResult(FormsResult result);
+    extern std::vector<FormsRequest> takeLuaFormsCommands();
+    extern void notifyLuaFormsClick(int handle);
+    extern void notifyLuaFormsFormClosed(int handle);
 }
 
 #endif //MELONDS_MELONDS_H

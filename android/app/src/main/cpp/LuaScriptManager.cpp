@@ -59,6 +59,7 @@ LuaScriptManager::LuaScriptManager(melonDS::NDS* nds, const uint32_t* inputMask)
 {
     sem_init(&stepRequested, 0, 0);
     sem_init(&stepCompleted, 0, 0);
+    sem_init(&formsResultReady, 0, 0);
 }
 
 LuaScriptManager::~LuaScriptManager()
@@ -66,6 +67,7 @@ LuaScriptManager::~LuaScriptManager()
     stop();
     sem_destroy(&stepRequested);
     sem_destroy(&stepCompleted);
+    sem_destroy(&formsResultReady);
 }
 
 void LuaScriptManager::logf(const char* fmt, ...)
@@ -107,6 +109,8 @@ void LuaScriptManager::start(const std::string& scriptPath)
     // script has actually asked for a step.
     while (sem_trywait(&stepRequested) == 0) {}
     while (sem_trywait(&stepCompleted) == 0) {}
+    while (sem_trywait(&formsResultReady) == 0) {}
+    pendingFormsRequest.reset();
 
     stopRequested.store(false);
     running.store(true);
@@ -124,12 +128,28 @@ void LuaScriptManager::stop()
     // Wake the script thread if it's parked inside emu.frameadvance()
     // waiting on a step that will never complete (e.g. the emulate() loop
     // isn't running), and wake the emulate() loop if it's parked waiting
-    // for a step request that will now never come.
+    // for a step request that will now never come. Also wake it if it's
+    // instead parked waiting on a forms.* bridge response that Kotlin may
+    // never get around to answering now.
     sem_post(&stepCompleted);
     sem_post(&stepRequested);
+    sem_post(&formsResultReady);
 
     scriptThread.join();
     running.store(false);
+
+    // Matches desktop's LuaFormsManager::destroyAll() call in its own
+    // stop(): a script's forms don't outlive it. Fire-and-forget is fine
+    // here (nothing is waiting on this).
+    {
+        std::lock_guard<std::mutex> lock(formsCallbackMutex);
+        formsClickRefs.clear();
+        formsCloseRefs.clear();
+        pendingFormsCallbackRefs.clear();
+    }
+    FormsRequest destroyAll;
+    destroyAll.op = FormsOp::DestroyAll;
+    queueFormsCommand(destroyAll);
 }
 
 bool LuaScriptManager::waitForStepRequest()
@@ -147,6 +167,122 @@ std::vector<LuaDrawCommand> LuaScriptManager::getDrawCommands()
 {
     std::lock_guard<std::mutex> lock(drawMutex);
     return displayCommands;
+}
+
+std::optional<FormsRequest> LuaScriptManager::pollFormsRequest()
+{
+    std::lock_guard<std::mutex> lock(formsBridgeMutex);
+    std::optional<FormsRequest> req = std::move(pendingFormsRequest);
+    pendingFormsRequest.reset();
+    return req;
+}
+
+void LuaScriptManager::deliverFormsResult(FormsResult result)
+{
+    // No lock needed on formsResult itself: sem_post/sem_wait already
+    // establishes the happens-before relationship the script thread needs
+    // to safely read what's written here before waking up.
+    formsResult = std::move(result);
+    sem_post(&formsResultReady);
+}
+
+std::vector<FormsRequest> LuaScriptManager::takeFormsCommands()
+{
+    std::lock_guard<std::mutex> lock(formsCommandsMutex);
+    std::vector<FormsRequest> commands = std::move(formsCommands);
+    formsCommands.clear();
+    return commands;
+}
+
+void LuaScriptManager::notifyFormsClick(int handle)
+{
+    std::lock_guard<std::mutex> lock(formsCallbackMutex);
+    auto it = formsClickRefs.find(handle);
+    if (it != formsClickRefs.end())
+        pendingFormsCallbackRefs.push_back(it->second);
+}
+
+void LuaScriptManager::notifyFormsFormClosed(int handle)
+{
+    std::lock_guard<std::mutex> lock(formsCallbackMutex);
+    auto it = formsCloseRefs.find(handle);
+    if (it != formsCloseRefs.end())
+        pendingFormsCallbackRefs.push_back(it->second);
+}
+
+FormsResult LuaScriptManager::callFormsBridge(FormsRequest req)
+{
+    {
+        std::lock_guard<std::mutex> lock(formsBridgeMutex);
+        pendingFormsRequest = std::move(req);
+    }
+    sem_wait(&formsResultReady);
+    return formsResult;
+}
+
+void LuaScriptManager::queueFormsCommand(const FormsRequest& req)
+{
+    std::lock_guard<std::mutex> lock(formsCommandsMutex);
+    formsCommands.push_back(req);
+}
+
+int LuaScriptManager::refFunctionArg(lua_State* L, int idx)
+{
+    if (lua_isnoneornil(L, idx))
+        return 0;
+    luaL_checktype(L, idx, LUA_TFUNCTION);
+    lua_pushvalue(L, idx);
+    return luaL_ref(L, LUA_REGISTRYINDEX);
+}
+
+std::vector<std::string> LuaScriptManager::checkStringList(lua_State* L, int idx)
+{
+    std::vector<std::string> result;
+    if (lua_isnoneornil(L, idx) || !lua_istable(L, idx))
+        return result;
+
+    lua_Integer n = lua_rawlen(L, idx);
+    for (lua_Integer i = 1; i <= n; i++)
+    {
+        lua_rawgeti(L, idx, (int)i);
+        if (lua_type(L, -1) == LUA_TSTRING)
+            result.emplace_back(lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+
+    if (result.empty())
+    {
+        // Not a plain array -- fall back to iterating all values (covers an
+        // associative table like {[key]=val, ...}).
+        lua_pushnil(L);
+        while (lua_next(L, idx) != 0)
+        {
+            if (lua_type(L, -1) == LUA_TSTRING)
+                result.emplace_back(lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+    return result;
+}
+
+void LuaScriptManager::dispatchFormsCallbacks()
+{
+    std::vector<int> refs;
+    {
+        std::lock_guard<std::mutex> lock(formsCallbackMutex);
+        refs = std::move(pendingFormsCallbackRefs);
+        pendingFormsCallbackRefs.clear();
+    }
+    for (int ref : refs)
+    {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+        if (lua_pcall(L, 0, 0, 0) != LUA_OK)
+        {
+            const char* err = lua_tostring(L, -1);
+            logf("Lua error in forms callback: %s", err ? err : "(unknown error)");
+            lua_pop(L, 1);
+        }
+    }
 }
 
 LuaScriptManager* LuaScriptManager::self(lua_State* L)
@@ -259,32 +395,34 @@ void LuaScriptManager::registerAPI()
     luaL_newlib(L, guiFuncs);
     lua_setglobal(L, "gui");
 
+    // forms.*: real as of Phase 3 -- bridged to Kotlin-side Compose UI
+    // state (LuaFormsOverlayUi.kt), not real separate OS windows.
     static const luaL_Reg formsFuncs[] = {
-        {"newform", l_stub_zero},
-        {"button", l_stub_zero},
-        {"label", l_stub_zero},
-        {"checkbox", l_stub_zero},
-        {"textbox", l_stub_zero},
-        {"dropdown", l_stub_zero},
-        {"setdropdownitems", l_stub_noop},
-        {"pictureBox", l_stub_zero},
-        {"setproperty", l_stub_noop},
-        {"setlocation", l_stub_noop},
-        {"settext", l_stub_noop},
-        {"gettext", l_stub_emptystring},
-        {"ischecked", l_stub_false},
-        {"destroy", l_stub_noop},
-        {"destroyall", l_stub_noop},
-        {"addclick", l_stub_noop},
-        {"getMouseX", l_stub_zero},
-        {"getMouseY", l_stub_zero},
-        {"openfile", l_stub_emptystring},
-        {"drawText", l_stub_noop},
-        {"drawRectangle", l_stub_noop},
-        {"drawEllipse", l_stub_noop},
-        {"drawImage", l_stub_noop},
-        {"clear", l_stub_noop},
-        {"refresh", l_stub_noop},
+        {"newform", l_forms_newform},
+        {"button", l_forms_button},
+        {"label", l_forms_label},
+        {"checkbox", l_forms_checkbox},
+        {"textbox", l_forms_textbox},
+        {"dropdown", l_forms_dropdown},
+        {"setdropdownitems", l_forms_setdropdownitems},
+        {"pictureBox", l_forms_picturebox},
+        {"setproperty", l_forms_setproperty},
+        {"setlocation", l_forms_setlocation},
+        {"settext", l_forms_settext},
+        {"gettext", l_forms_gettext},
+        {"ischecked", l_forms_ischecked},
+        {"destroy", l_forms_destroy},
+        {"destroyall", l_forms_destroyall},
+        {"addclick", l_forms_addclick},
+        {"getMouseX", l_forms_getmousex},
+        {"getMouseY", l_forms_getmousey},
+        {"openfile", l_forms_openfile},
+        {"drawText", l_forms_drawtext},
+        {"drawRectangle", l_forms_drawrectangle},
+        {"drawEllipse", l_forms_drawellipse},
+        {"drawImage", l_forms_drawimage},
+        {"clear", l_forms_clear},
+        {"refresh", l_forms_refresh},
         {nullptr, nullptr}
     };
     luaL_newlib(L, formsFuncs);
@@ -511,6 +649,11 @@ int LuaScriptManager::l_emu_frameadvance(lua_State* L)
     if (mgr->stopRequested.load())
         return luaL_error(L, "script stopped");
 
+    // Dispatch any pending forms.* callbacks (button clicks, form close)
+    // queued by Kotlin since the last call -- always, even while idling for
+    // a ROM to load, so e.g. a settings form stays responsive.
+    mgr->dispatchFormsCallbacks();
+
     // Request exactly one frame step from the native emulate() loop and
     // wait for it to finish. Mirrors the desktop build's EmuThread-RPC
     // approach, just with a direct semaphore rendezvous instead of a
@@ -709,33 +852,360 @@ int LuaScriptManager::l_gui_clearimagecache(lua_State* L)
     return 0;
 }
 
-int LuaScriptManager::l_stub_noop(lua_State* L)
+int LuaScriptManager::l_forms_newform(lua_State* L)
 {
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::NewForm;
+    req.w = (int)checkIntArg(L, 1);
+    req.h = (int)checkIntArg(L, 2);
+    req.text = luaL_optstring(L, 3, "Script Window");
+    int onCloseRef = refFunctionArg(L, 4);
+
+    int handle = mgr->callFormsBridge(req).intResult;
+    if (onCloseRef != 0)
+    {
+        std::lock_guard<std::mutex> lock(mgr->formsCallbackMutex);
+        mgr->formsCloseRefs[handle] = onCloseRef;
+    }
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_button(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Button;
+    req.handle = (int)checkIntArg(L, 1); // parent form handle
+    req.text = luaL_optstring(L, 2, "");
+    int onClickRef = refFunctionArg(L, 3);
+    req.x = (int)optIntArg(L, 4, 0);
+    req.y = (int)optIntArg(L, 5, 0);
+    req.w = (int)optIntArg(L, 6, 75);
+    req.h = (int)optIntArg(L, 7, 23);
+
+    int handle = mgr->callFormsBridge(req).intResult;
+    if (onClickRef != 0)
+    {
+        std::lock_guard<std::mutex> lock(mgr->formsCallbackMutex);
+        mgr->formsClickRefs[handle] = onClickRef;
+    }
+    lua_pushinteger(L, handle);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_label(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Label;
+    req.handle = (int)checkIntArg(L, 1);
+    req.text = luaL_optstring(L, 2, "");
+    req.x = (int)optIntArg(L, 3, 0);
+    req.y = (int)optIntArg(L, 4, 0);
+    req.w = (int)optIntArg(L, 5, 0);
+    req.h = (int)optIntArg(L, 6, 0);
+
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_checkbox(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Checkbox;
+    req.handle = (int)checkIntArg(L, 1);
+    req.text = luaL_optstring(L, 2, "");
+    req.x = (int)optIntArg(L, 3, 0);
+    req.y = (int)optIntArg(L, 4, 0);
+
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_textbox(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Textbox;
+    req.handle = (int)checkIntArg(L, 1);
+    req.text = luaL_optstring(L, 2, "");
+    req.w = (int)optIntArg(L, 3, 100);
+    req.h = (int)optIntArg(L, 4, 20);
+    // arg 5 ("type", e.g. "HEX"/"NUMBER" input filtering) intentionally
+    // ignored -- just a plain text field, no input validation.
+    req.x = (int)optIntArg(L, 6, 0);
+    req.y = (int)optIntArg(L, 7, 0);
+    req.boolArg = lua_gettop(L) >= 8 && lua_toboolean(L, 8); // multiline
+
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_dropdown(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Dropdown;
+    req.handle = (int)checkIntArg(L, 1);
+    req.items = checkStringList(L, 2);
+    req.x = (int)optIntArg(L, 3, 0);
+    req.y = (int)optIntArg(L, 4, 0);
+    req.w = (int)optIntArg(L, 5, 100);
+    req.h = (int)optIntArg(L, 6, 20);
+
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_setdropdownitems(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::SetDropdownItems;
+    req.handle = (int)checkIntArg(L, 1);
+    req.items = checkStringList(L, 2);
+    mgr->queueFormsCommand(req);
     return 0;
 }
 
-int LuaScriptManager::l_stub_zero(lua_State* L)
+int LuaScriptManager::l_forms_picturebox(lua_State* L)
 {
-    lua_pushinteger(L, 0);
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::PictureBox;
+    req.handle = (int)checkIntArg(L, 1);
+    req.x = (int)checkIntArg(L, 2);
+    req.y = (int)checkIntArg(L, 3);
+    req.w = (int)checkIntArg(L, 4);
+    req.h = (int)checkIntArg(L, 5);
+
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
     return 1;
 }
 
-int LuaScriptManager::l_stub_emptystring(lua_State* L)
+int LuaScriptManager::l_forms_setproperty(lua_State* L)
 {
-    lua_pushstring(L, "");
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::SetProperty;
+    req.handle = (int)checkIntArg(L, 1);
+    req.text = luaL_checkstring(L, 2);
+
+    if (lua_isboolean(L, 3))
+        req.text2 = lua_toboolean(L, 3) ? "true" : "false";
+    else
+    {
+        size_t len;
+        const char* s = luaL_tolstring(L, 3, &len);
+        req.text2.assign(s, len);
+        lua_pop(L, 1);
+    }
+
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_setlocation(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::SetLocation;
+    req.handle = (int)checkIntArg(L, 1);
+    req.x = (int)checkIntArg(L, 2);
+    req.y = (int)checkIntArg(L, 3);
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_settext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::SetText;
+    req.handle = (int)checkIntArg(L, 1);
+    req.text = luaL_checkstring(L, 2);
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_gettext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::GetText;
+    req.handle = (int)checkIntArg(L, 1);
+    lua_pushstring(L, mgr->callFormsBridge(req).stringResult.c_str());
     return 1;
 }
 
-int LuaScriptManager::l_stub_false(lua_State* L)
+int LuaScriptManager::l_forms_ischecked(lua_State* L)
 {
-    lua_pushboolean(L, false);
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::IsChecked;
+    req.handle = (int)checkIntArg(L, 1);
+    lua_pushboolean(L, mgr->callFormsBridge(req).boolResult);
     return 1;
 }
 
-int LuaScriptManager::l_stub_emptytable(lua_State* L)
+int LuaScriptManager::l_forms_destroy(lua_State* L)
 {
-    lua_newtable(L);
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)checkIntArg(L, 1);
+    {
+        std::lock_guard<std::mutex> lock(mgr->formsCallbackMutex);
+        mgr->formsClickRefs.erase(handle);
+        mgr->formsCloseRefs.erase(handle);
+    }
+    FormsRequest req;
+    req.op = FormsOp::Destroy;
+    req.handle = handle;
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_destroyall(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    {
+        std::lock_guard<std::mutex> lock(mgr->formsCallbackMutex);
+        mgr->formsClickRefs.clear();
+        mgr->formsCloseRefs.clear();
+    }
+    FormsRequest req;
+    req.op = FormsOp::DestroyAll;
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_addclick(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    int handle = (int)checkIntArg(L, 1);
+    int ref = refFunctionArg(L, 2);
+    if (ref == 0)
+        return 0;
+    std::lock_guard<std::mutex> lock(mgr->formsCallbackMutex);
+    mgr->formsClickRefs[handle] = ref;
+    return 0;
+}
+
+int LuaScriptManager::l_forms_getmousex(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::GetMouseX;
+    req.handle = (int)checkIntArg(L, 1);
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
     return 1;
+}
+
+int LuaScriptManager::l_forms_getmousey(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::GetMouseY;
+    req.handle = (int)checkIntArg(L, 1);
+    lua_pushinteger(L, mgr->callFormsBridge(req).intResult);
+    return 1;
+}
+
+int LuaScriptManager::l_forms_openfile(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::OpenFile;
+    req.text = (lua_gettop(L) >= 2 && lua_isstring(L, 2)) ? lua_tostring(L, 2) : ""; // initial dir
+    req.text2 = (lua_gettop(L) >= 3 && lua_isstring(L, 3)) ? lua_tostring(L, 3) : ""; // filter
+    // arg 4 (dialog title) not plumbed through -- low value for a mobile
+    // file browser that's already scoped to the app's own script folder.
+    lua_pushstring(L, mgr->callFormsBridge(req).stringResult.c_str());
+    return 1;
+}
+
+int LuaScriptManager::l_forms_drawtext(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::DrawText;
+    req.handle = (int)checkIntArg(L, 1);
+    req.x = (int)checkIntArg(L, 2);
+    req.y = (int)checkIntArg(L, 3);
+    req.text = luaL_checkstring(L, 4);
+    req.color = lua_gettop(L) >= 5 ? checkColor(L, 5) : 0xFFFFFFFF;
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_drawrectangle(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::DrawRectangle;
+    req.handle = (int)checkIntArg(L, 1);
+    req.x = (int)checkIntArg(L, 2);
+    req.y = (int)checkIntArg(L, 3);
+    req.w = (int)checkIntArg(L, 4);
+    req.h = (int)checkIntArg(L, 5);
+    req.color = checkColor(L, 6);
+    req.fillColor = checkColor(L, 7);
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_drawellipse(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::DrawEllipse;
+    req.handle = (int)checkIntArg(L, 1);
+    req.x = (int)checkIntArg(L, 2);
+    req.y = (int)checkIntArg(L, 3);
+    req.w = (int)checkIntArg(L, 4);
+    req.h = (int)checkIntArg(L, 5);
+    req.color = checkColor(L, 6);
+    req.fillColor = checkColor(L, 7);
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_drawimage(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::DrawImage;
+    req.handle = (int)checkIntArg(L, 1);
+    req.text = luaL_checkstring(L, 2); // image path
+    req.x = (int)checkIntArg(L, 3);
+    req.y = (int)checkIntArg(L, 4);
+    req.w = (int)optIntArg(L, 5, 0);
+    req.h = (int)optIntArg(L, 6, 0);
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_clear(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Clear;
+    req.handle = (int)checkIntArg(L, 1);
+    req.color = checkColor(L, 2);
+    mgr->queueFormsCommand(req);
+    return 0;
+}
+
+int LuaScriptManager::l_forms_refresh(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::Refresh;
+    req.handle = (int)checkIntArg(L, 1);
+    mgr->queueFormsCommand(req);
+    return 0;
 }
 
 int LuaScriptManager::l_input_getmouse_stub(lua_State* L)

@@ -6,6 +6,7 @@ import me.magnum.melonds.domain.model.Cheat
 import me.magnum.melonds.domain.model.EmulatorConfiguration
 import me.magnum.melonds.domain.model.Input
 import me.magnum.melonds.domain.model.LuaDrawCommand
+import me.magnum.melonds.domain.model.LuaFormsRequest
 import me.magnum.melonds.domain.model.retroachievements.RASimpleAchievement
 import me.magnum.melonds.domain.model.retroachievements.RASimpleLeaderboard
 import me.magnum.melonds.domain.model.retroachievements.RASimpleRuntimeAchievement
@@ -147,4 +148,14 @@ object MelonEmulator {
     external fun isLuaScriptActive(): Boolean
 
     external fun getLuaDrawCommands(): Array<LuaDrawCommand>
+
+    external fun pollLuaFormsRequest(): LuaFormsRequest?
+
+    external fun deliverLuaFormsResult(intResult: Int, stringResult: String, boolResult: Boolean)
+
+    external fun takeLuaFormsCommands(): Array<LuaFormsRequest>
+
+    external fun notifyLuaFormsClick(handle: Int)
+
+    external fun notifyLuaFormsFormClosed(handle: Int)
 }
