@@ -57,8 +57,48 @@ import java.util.zip.GZIPInputStream
 import kotlin.math.roundToInt
 
 private const val POLL_INTERVAL_MS = 16L
+private const val SAV_EXPORT_INTERVAL_MS = 30_000L
 
 private class OpenFileRequest(val initialDir: String, val onPicked: (String) -> Unit, val onCancel: () -> Unit)
+
+/**
+ * Copies [sourceFile] into the SAF tree at [dirUri], keeping exactly one
+ * backup generation: whatever was already at that destination name becomes
+ * "-previous" (replacing any older "-previous" file), rather than being
+ * overwritten outright. Best-effort/silent on failure -- every caller uses
+ * this for a convenience copy that must never affect a result already
+ * delivered back to the Lua script. Must be called from a background
+ * (IO) dispatcher -- this does blocking file I/O.
+ */
+private fun exportFileWithPreviousBackup(context: android.content.Context, sourceFile: File, dirUri: Uri, mimeType: String = "application/octet-stream") {
+    if (!sourceFile.exists()) {
+        return
+    }
+    try {
+        val root = DocumentFile.fromTreeUri(context, dirUri)
+        if (root == null) {
+            android.util.Log.e("LuaFormsOverlay", "Export directory is no longer accessible: $dirUri")
+            return
+        }
+        val previousName = if (sourceFile.extension.isNotEmpty()) {
+            "${sourceFile.nameWithoutExtension}-previous.${sourceFile.extension}"
+        } else {
+            "${sourceFile.name}-previous"
+        }
+        root.findFile(previousName)?.delete()
+        root.findFile(sourceFile.name)?.renameTo(previousName)
+        val dest = root.createFile(mimeType, sourceFile.name)
+        if (dest != null) {
+            context.contentResolver.openOutputStream(dest.uri)?.use { out ->
+                sourceFile.inputStream().use { input -> input.copyTo(out) }
+            }
+        } else {
+            android.util.Log.e("LuaFormsOverlay", "Could not create export file for ${sourceFile.path} in $dirUri")
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("LuaFormsOverlay", "Failed to export ${sourceFile.path} to $dirUri", e)
+    }
+}
 
 /**
  * Renders every form a running Lua script has created (LuaFormsManager's
@@ -77,10 +117,45 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, settingsRepository: SettingsRepo
     }
 
     var openFileRequest by remember { mutableStateOf<OpenFileRequest?>(null) }
+    // The .sav alongside the most recently randomized ROM -- unlike the ROM
+    // itself (written once, at randomization time), a save file changes
+    // continuously during play, so it's periodically re-exported below
+    // rather than copied just once. Only tracks the randomizer's own
+    // output; a ROM swapped in via "Use batch of seeds" (plain
+    // client.openrom(), no forms-bridge round trip) isn't visible here.
+    var trackedSavFile by remember { mutableStateOf<File?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleCoroutineScope = rememberCoroutineScope()
+
+    // Catches the common "switch away / swipe the app closed" case
+    // immediately, rather than waiting for the next periodic tick below --
+    // onPause fires reliably on backgrounding, even though a hard kill
+    // (force-stop, low-memory process death) skips it entirely, same
+    // fundamental limitation as the periodic export.
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                val savFile = trackedSavFile
+                if (savFile != null && settingsRepository.isRandomizerAutoExportEnabled()) {
+                    val exportDirUri = settingsRepository.getRandomizerExportDirectory()
+                    if (exportDirUri != null) {
+                        lifecycleCoroutineScope.launch(Dispatchers.IO) {
+                            exportFileWithPreviousBackup(context, savFile, exportDirUri)
+                        }
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         LuaFormsManager.reset()
+        var lastSavExportAtMs = 0L
         while (isActive) {
             try {
                 for (cmd in MelonEmulator.takeLuaFormsCommands()) {
@@ -154,45 +229,29 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, settingsRepository: SettingsRepo
                                 }
                                 MelonEmulator.deliverLuaFormsResult(0, "", success)
 
-                                // Best-effort: this is purely a convenience copy for
-                                // resuming outside the tracker's own in-session ROM
-                                // swapping (see the randomizer_export_dir setting's
-                                // summary) -- never surface a failure here to the
-                                // Lua script, which already got its real result above.
-                                if (success && settingsRepository.isRandomizerAutoExportEnabled()) {
-                                    val exportDirUri = settingsRepository.getRandomizerExportDirectory()
-                                    if (exportDirUri != null) {
-                                        try {
-                                            val outputFile = File(outputPath)
-                                            val root = DocumentFile.fromTreeUri(context, exportDirUri)
-                                            if (root != null) {
-                                                // Keep exactly one backup generation: the export
-                                                // that was current before this one becomes
-                                                // "-previous" (replacing whatever was already
-                                                // there), rather than being lost outright --
-                                                // lets you fall back a seed if the latest one
-                                                // turns out to be a dud, without accumulating an
-                                                // ever-growing pile of old exports.
-                                                val previousName = if (outputFile.extension.isNotEmpty()) {
-                                                    "${outputFile.nameWithoutExtension}-previous.${outputFile.extension}"
-                                                } else {
-                                                    "${outputFile.name}-previous"
-                                                }
-                                                root.findFile(previousName)?.delete()
-                                                root.findFile(outputFile.name)?.renameTo(previousName)
-                                                val dest = root.createFile("application/octet-stream", outputFile.name)
-                                                if (dest != null) {
-                                                    context.contentResolver.openOutputStream(dest.uri)?.use { out ->
-                                                        outputFile.inputStream().use { input -> input.copyTo(out) }
-                                                    }
-                                                } else {
-                                                    android.util.Log.e("LuaFormsOverlay", "Could not create randomizer export file for $outputPath in $exportDirUri")
-                                                }
-                                            } else {
-                                                android.util.Log.e("LuaFormsOverlay", "Randomizer export directory is no longer accessible: $exportDirUri")
-                                            }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("LuaFormsOverlay", "Failed to export randomized ROM to $exportDirUri", e)
+                                if (success) {
+                                    // Same basename/directory/.sav-extension derivation
+                                    // client.openrom() itself uses -- this is the save
+                                    // file that'll exist once the tracker actually
+                                    // swaps into this ROM, tracked here so the
+                                    // periodic/on-pause exports below know what to copy.
+                                    val outputFile = File(outputPath)
+                                    val savPath = if (outputFile.extension.isNotEmpty()) {
+                                        outputFile.path.removeSuffix(".${outputFile.extension}") + ".sav"
+                                    } else {
+                                        "${outputFile.path}.sav"
+                                    }
+                                    trackedSavFile = File(savPath)
+
+                                    // Best-effort: this is purely a convenience copy for
+                                    // resuming outside the tracker's own in-session ROM
+                                    // swapping (see the randomizer_export_dir setting's
+                                    // summary) -- never surface a failure here to the
+                                    // Lua script, which already got its real result above.
+                                    if (settingsRepository.isRandomizerAutoExportEnabled()) {
+                                        val exportDirUri = settingsRepository.getRandomizerExportDirectory()
+                                        if (exportDirUri != null) {
+                                            exportFileWithPreviousBackup(context, outputFile, exportDirUri)
                                         }
                                     }
                                 }
@@ -223,6 +282,22 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, settingsRepository: SettingsRepo
                 }
             } catch (e: Exception) {
                 android.util.Log.e("LuaFormsOverlay", "Error polling for a forms request", e)
+            }
+
+            val savFileToExport = trackedSavFile
+            if (savFileToExport != null) {
+                val now = System.currentTimeMillis()
+                if (now - lastSavExportAtMs >= SAV_EXPORT_INTERVAL_MS) {
+                    lastSavExportAtMs = now
+                    if (settingsRepository.isRandomizerAutoExportEnabled()) {
+                        val exportDirUri = settingsRepository.getRandomizerExportDirectory()
+                        if (exportDirUri != null) {
+                            launch(Dispatchers.IO) {
+                                exportFileWithPreviousBackup(context, savFileToExport, exportDirUri)
+                            }
+                        }
+                    }
+                }
             }
 
             delay(POLL_INTERVAL_MS)
