@@ -50,6 +50,9 @@ import me.magnum.melonds.domain.model.LuaDrawCommand
 private const val NDS_WIDTH = 256f
 private const val NDS_HEIGHT = 384f
 private const val POLL_INTERVAL_MS = 33L // ~30fps, independent of core framerate
+// Tunable "how much of the available height to fill" factor for the gui.*
+// overlay -- 1.0 fills it edge-to-edge, which read as too large in practice.
+private const val OVERLAY_SCALE_FACTOR = 0.65f
 
 /**
  * Renders a running Lua script's gui.draw*() overlay on top of the game,
@@ -94,7 +97,7 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 // extend past the screen edge, reachable by scrolling.
                 val density = LocalDensity.current
                 val availableHeightPx = with(density) { maxHeight.toPx() }
-                val scale = if (totalHeight > 0f) availableHeightPx / totalHeight else 1f
+                val scale = if (totalHeight > 0f) (availableHeightPx / totalHeight) * OVERLAY_SCALE_FACTOR else 1f
                 val canvasWidthDp = with(density) { (totalWidth * scale).toDp() }
 
                 Box(modifier = Modifier.fillMaxHeight().horizontalScroll(rememberScrollState())) {
