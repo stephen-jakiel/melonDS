@@ -134,19 +134,19 @@ object LuaFormsManager {
             LuaFormsRequest.OP_DESTROY_ALL -> forms.clear()
             LuaFormsRequest.OP_DRAW_TEXT -> appendPictureBoxCommand(
                 req.handle,
-                LuaDrawCommand(LuaDrawCommand.KIND_TEXT, req.x, req.y, 0, 0, req.color, 0, req.text, FloatArray(0), false, 0, 0, 0, 0),
+                LuaDrawCommand(LuaDrawCommand.KIND_TEXT, req.x, req.y, 0, 0, req.color, 0, req.text, FloatArray(0), false, 0, 0, 0, 0, 9),
             )
             LuaFormsRequest.OP_DRAW_RECTANGLE -> appendPictureBoxCommand(
                 req.handle,
-                LuaDrawCommand(LuaDrawCommand.KIND_RECT, req.x, req.y, req.w, req.h, req.color, req.fillColor, "", FloatArray(0), false, 0, 0, 0, 0),
+                LuaDrawCommand(LuaDrawCommand.KIND_RECT, req.x, req.y, req.w, req.h, req.color, req.fillColor, "", FloatArray(0), false, 0, 0, 0, 0, 9),
             )
             LuaFormsRequest.OP_DRAW_ELLIPSE -> appendPictureBoxCommand(
                 req.handle,
-                LuaDrawCommand(LuaDrawCommand.KIND_ELLIPSE, req.x, req.y, req.w, req.h, req.color, req.fillColor, "", FloatArray(0), false, 0, 0, 0, 0),
+                LuaDrawCommand(LuaDrawCommand.KIND_ELLIPSE, req.x, req.y, req.w, req.h, req.color, req.fillColor, "", FloatArray(0), false, 0, 0, 0, 0, 9),
             )
             LuaFormsRequest.OP_DRAW_IMAGE -> appendPictureBoxCommand(
                 req.handle,
-                LuaDrawCommand(LuaDrawCommand.KIND_IMAGE, req.x, req.y, req.w, req.h, 0, 0, req.text, FloatArray(0), false, 0, 0, 0, 0),
+                LuaDrawCommand(LuaDrawCommand.KIND_IMAGE, req.x, req.y, req.w, req.h, 0, 0, req.text, FloatArray(0), false, 0, 0, 0, 0, 9),
             )
             LuaFormsRequest.OP_CLEAR -> (findWidget(req.handle) as? LuaWidget.PictureBox)?.let {
                 it.commands.clear()

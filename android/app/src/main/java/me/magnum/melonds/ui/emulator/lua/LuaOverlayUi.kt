@@ -154,7 +154,7 @@ fun DrawScope.drawLuaCommandsAt(commands: List<LuaDrawCommand>, imageCache: Muta
                 LuaDrawCommand.KIND_TEXT -> {
                     val paint = Paint().apply {
                         color = cmd.color
-                        textSize = 14f * scale
+                        textSize = cmd.fontSize * scale
                         isAntiAlias = true
                     }
                     drawText(cmd.text, offsetX + cmd.x1 * scale, offsetY + cmd.y1 * scale + paint.textSize, paint)

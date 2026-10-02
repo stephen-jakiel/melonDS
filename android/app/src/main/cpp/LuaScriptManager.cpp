@@ -743,6 +743,11 @@ int LuaScriptManager::l_gui_drawtext(lua_State* L)
     cmd.y1 = (int)checkIntArg(L, 2);
     cmd.text = luaL_checkstring(L, 3);
     cmd.color = lua_gettop(L) >= 4 ? checkColor(L, 4) : 0xFFFFFFFF;
+    // arg 5 is a background color (not currently drawn), arg 6 is the font
+    // size this tracker always passes explicitly (its own default is 9,
+    // much smaller than a fixed guess would be) -- honor it instead of
+    // guessing a size on the Kotlin rendering side.
+    cmd.fontSize = (int)optIntArg(L, 6, 9);
 
     std::lock_guard<std::mutex> lock(mgr->drawMutex);
     mgr->drawCommands.push_back(cmd);

@@ -26,6 +26,7 @@ data class LuaDrawCommand(
     val srcY: Int,
     val srcW: Int,
     val srcH: Int,
+    val fontSize: Int, // Text only, in NDS-native pixel units (gui.drawText's own fontsize arg)
 ) {
     companion object {
         const val KIND_TEXT = 0
@@ -44,7 +45,8 @@ data class LuaDrawCommand(
         return kind == other.kind && x1 == other.x1 && y1 == other.y1 && x2 == other.x2 && y2 == other.y2 &&
             color == other.color && fillColor == other.fillColor && text == other.text &&
             points.contentEquals(other.points) && hasSrcRect == other.hasSrcRect &&
-            srcX == other.srcX && srcY == other.srcY && srcW == other.srcW && srcH == other.srcH
+            srcX == other.srcX && srcY == other.srcY && srcW == other.srcW && srcH == other.srcH &&
+            fontSize == other.fontSize
     }
 
     override fun hashCode(): Int {
@@ -62,6 +64,7 @@ data class LuaDrawCommand(
         result = 31 * result + srcY
         result = 31 * result + srcW
         result = 31 * result + srcH
+        result = 31 * result + fontSize
         return result
     }
 }

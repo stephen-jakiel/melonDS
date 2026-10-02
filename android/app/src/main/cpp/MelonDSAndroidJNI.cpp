@@ -477,7 +477,7 @@ Java_me_magnum_melonds_MelonEmulator_getLuaDrawCommands(JNIEnv* env, jobject thi
     std::vector<MelonDSAndroid::LuaDrawCommand> commands = MelonDSAndroid::getLuaDrawCommands();
 
     jclass cmdClass = env->FindClass("me/magnum/melonds/domain/model/LuaDrawCommand");
-    jmethodID ctor = env->GetMethodID(cmdClass, "<init>", "(IIIIIIILjava/lang/String;[FZIIII)V");
+    jmethodID ctor = env->GetMethodID(cmdClass, "<init>", "(IIIIIIILjava/lang/String;[FZIIIII)V");
 
     jobjectArray result = env->NewObjectArray((jsize) commands.size(), cmdClass, nullptr);
     for (size_t i = 0; i < commands.size(); i++)
@@ -502,7 +502,8 @@ Java_me_magnum_melonds_MelonEmulator_getLuaDrawCommands(JNIEnv* env, jobject thi
         jobject obj = env->NewObject(cmdClass, ctor,
             (jint) cmd.kind, (jint) cmd.x1, (jint) cmd.y1, (jint) cmd.x2, (jint) cmd.y2,
             (jint) cmd.color, (jint) cmd.fillColor, text, points,
-            (jboolean) cmd.hasSrcRect, (jint) cmd.srcX, (jint) cmd.srcY, (jint) cmd.srcW, (jint) cmd.srcH);
+            (jboolean) cmd.hasSrcRect, (jint) cmd.srcX, (jint) cmd.srcY, (jint) cmd.srcW, (jint) cmd.srcH,
+            (jint) cmd.fontSize);
 
         env->SetObjectArrayElement(result, (jsize) i, obj);
 

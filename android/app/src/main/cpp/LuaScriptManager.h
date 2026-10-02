@@ -37,6 +37,7 @@ struct LuaDrawCommand
     std::vector<std::pair<float, float>> points; // Polygon only
     bool hasSrcRect = false;
     int srcX = 0, srcY = 0, srcW = 0, srcH = 0; // Image only, source crop region
+    int fontSize = 9; // Text only, in NDS-native pixel units; 9 matches this tracker's own default
 };
 
 // forms.*: unlike gui.* (which only ever accumulates draw commands onto the
