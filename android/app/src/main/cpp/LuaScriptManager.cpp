@@ -750,7 +750,13 @@ int LuaScriptManager::l_gui_drawtext(lua_State* L)
     cmd.kind = LuaDrawCommand::Text;
     cmd.x1 = (int)checkIntArg(L, 1);
     cmd.y1 = (int)checkIntArg(L, 2);
-    cmd.text = luaL_checkstring(L, 3);
+    // BizHawk's real gui.text() tolerates a nil/missing text argument
+    // (observed e.g. with NDS-Ironmon-Tracker's FormsUtils.shortenFolderName(),
+    // which falls through with no explicit return -- and thus returns nil --
+    // for an empty path, a real case on a fresh install's unset quickload
+    // paths); luaL_checkstring() would hard-error the whole script on that,
+    // so treat a non-string arg here as an empty string instead.
+    cmd.text = luaL_optstring(L, 3, "");
     cmd.color = lua_gettop(L) >= 4 ? checkColor(L, 4) : 0xFFFFFFFF;
     // arg 5 is a background color (not currently drawn), arg 6 is the font
     // size this tracker always passes explicitly (its own default is 9,
