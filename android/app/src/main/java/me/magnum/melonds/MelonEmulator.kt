@@ -158,4 +158,6 @@ object MelonEmulator {
     external fun notifyLuaFormsClick(handle: Int)
 
     external fun notifyLuaFormsFormClosed(handle: Int)
+
+    external fun getLuaScreenPadding(): IntArray
 }

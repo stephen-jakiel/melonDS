@@ -253,6 +253,11 @@ FormsResult LuaScriptManager::callFormsBridge(FormsRequest req)
 
 void LuaScriptManager::queueFormsCommand(const FormsRequest& req)
 {
+    // TEMPORARY diagnostic (Phase 3 bring-up): throttled so drawing-heavy
+    // scripts don't flood logcat, but enough to tell whether forms.* is
+    // doing *anything* after the point where blocking calls stop showing up.
+    if (frameCount % 30 == 0)
+        logf("forms bridge: command op=%d handle=%d", (int)req.op, req.handle);
     std::lock_guard<std::mutex> lock(formsCommandsMutex);
     formsCommands.push_back(req);
 }
@@ -1269,9 +1274,18 @@ int LuaScriptManager::l_input_getmouse_stub(lua_State* L)
 
 int LuaScriptManager::l_client_setgameextrapadding(lua_State* L)
 {
-    // Phase 1: no on-screen overlay/forms host yet to reserve space in, so
-    // nothing to actually resize. Accept the call silently so scripts that
-    // always call this up front don't trip an "unknown function" error.
+    // Stored so client.bufferwidth()/screenwidth()/screenheight() (below)
+    // and the Kotlin-side gui.* overlay (which reads this via
+    // getScreenPadding()) agree on how much extra room the script has to
+    // draw in. Without this, this tracker's own UI framework computes a
+    // 0x0 size for its main screen's content box and silently skips
+    // drawing it entirely (Box.show()'s own "nothing to draw" guard) --
+    // confirmed as the actual root cause of its whole UI never appearing.
+    LuaScriptManager* mgr = self(L);
+    mgr->luaPadLeft.store((int)checkIntArg(L, 1));
+    mgr->luaPadTop.store((int)checkIntArg(L, 2));
+    mgr->luaPadRight.store((int)checkIntArg(L, 3));
+    mgr->luaPadBottom.store((int)checkIntArg(L, 4));
     return 0;
 }
 
@@ -1322,19 +1336,22 @@ int LuaScriptManager::l_client_get_approx_framerate(lua_State* L)
 
 int LuaScriptManager::l_client_bufferwidth(lua_State* L)
 {
-    lua_pushinteger(L, 256);
+    LuaScriptManager* mgr = self(L);
+    lua_pushinteger(L, 256 + mgr->luaPadLeft.load() + mgr->luaPadRight.load());
     return 1;
 }
 
 int LuaScriptManager::l_client_screenwidth(lua_State* L)
 {
-    lua_pushinteger(L, 256);
+    LuaScriptManager* mgr = self(L);
+    lua_pushinteger(L, 256 + mgr->luaPadLeft.load() + mgr->luaPadRight.load());
     return 1;
 }
 
 int LuaScriptManager::l_client_screenheight(lua_State* L)
 {
-    lua_pushinteger(L, 384);
+    LuaScriptManager* mgr = self(L);
+    lua_pushinteger(L, 384 + mgr->luaPadTop.load() + mgr->luaPadBottom.load());
     return 1;
 }
 

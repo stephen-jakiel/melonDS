@@ -169,6 +169,17 @@ public:
     void notifyFormsClick(int handle);
     void notifyFormsFormClosed(int handle);
 
+    // client.SetGameExtraPadding()'s current values, for the Kotlin-side
+    // gui.* overlay to size its NDS-native coordinate space against (see
+    // l_client_setgameextrapadding's comment for why this matters).
+    void getScreenPadding(int& left, int& top, int& right, int& bottom) const
+    {
+        left = luaPadLeft.load();
+        top = luaPadTop.load();
+        right = luaPadRight.load();
+        bottom = luaPadBottom.load();
+    }
+
 private:
     void threadMain(std::string scriptPath);
     void registerAPI();
@@ -344,6 +355,16 @@ private:
     std::map<int, int> formsClickRefs;              // widget handle -> Lua ref
     std::map<int, int> formsCloseRefs;               // form handle -> Lua ref
     std::vector<int> pendingFormsCallbackRefs;       // refs ready to invoke
+
+    // client.SetGameExtraPadding(left, top, right, bottom): extra drawing
+    // space beyond the 256x384 NDS screen the script has reserved for its
+    // own UI (e.g. this tracker asks for 199px to its right). Atomic since
+    // it's written from the script thread but read from Kotlin's overlay
+    // rendering loop.
+    std::atomic<int> luaPadLeft {0};
+    std::atomic<int> luaPadTop {0};
+    std::atomic<int> luaPadRight {0};
+    std::atomic<int> luaPadBottom {0};
 };
 
 }

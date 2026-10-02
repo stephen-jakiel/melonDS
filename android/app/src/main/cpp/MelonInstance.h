@@ -86,6 +86,7 @@ public:
     std::vector<FormsRequest> takeLuaFormsCommands();
     void notifyLuaFormsClick(int handle);
     void notifyLuaFormsFormClosed(int handle);
+    void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
 
 private:
     void updateRenderer();

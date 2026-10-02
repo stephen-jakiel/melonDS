@@ -598,6 +598,18 @@ Java_me_magnum_melonds_MelonEmulator_notifyLuaFormsFormClosed(JNIEnv* env, jobje
     MelonDSAndroid::notifyLuaFormsFormClosed(handle);
 }
 
+JNIEXPORT jintArray JNICALL
+Java_me_magnum_melonds_MelonEmulator_getLuaScreenPadding(JNIEnv* env, jobject thiz)
+{
+    int left, top, right, bottom;
+    MelonDSAndroid::getLuaScreenPadding(left, top, right, bottom);
+
+    jintArray result = env->NewIntArray(4);
+    jint values[4] = {(jint) left, (jint) top, (jint) right, (jint) bottom};
+    env->SetIntArrayRegion(result, 0, 4, values);
+    return result;
+}
+
 JNIEXPORT void JNICALL
 Java_me_magnum_melonds_MelonEmulator_stopEmulation(JNIEnv* env, jobject thiz)
 {

@@ -36,7 +36,11 @@ import me.magnum.melonds.domain.model.LuaDrawCommand
 // NDS-native coordinate space the gui.* overlay is drawn in: a standard
 // top-then-bottom dual-screen layout (256 wide, top screen y=[0,192),
 // bottom screen y=[192,384)), same simplification the desktop build makes
-// -- custom/rotated screen layouts aren't accounted for yet.
+// -- custom/rotated screen layouts aren't accounted for yet. Expanded by
+// whatever client.SetGameExtraPadding() last requested -- scripts (this
+// tracker included) size their own UI against client.bufferwidth()/
+// screenwidth()/screenheight(), which report this same expanded size, and
+// draw into the extra space assuming it's really there.
 private const val NDS_WIDTH = 256f
 private const val NDS_HEIGHT = 384f
 private const val POLL_INTERVAL_MS = 33L // ~30fps, independent of core framerate
@@ -56,11 +60,13 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
 
     var expanded by rememberSaveable(isScriptRunning) { mutableStateOf(true) }
     var commands by remember { mutableStateOf<List<LuaDrawCommand>>(emptyList()) }
+    var padding by remember { mutableStateOf(IntArray(4)) } // left, top, right, bottom
     val imageCache = remember { mutableMapOf<String, Bitmap?>() }
 
     LaunchedEffect(Unit) {
         while (isActive) {
             commands = MelonEmulator.getLuaDrawCommands().asList()
+            padding = MelonEmulator.getLuaScreenPadding()
             delay(POLL_INTERVAL_MS)
         }
     }
@@ -68,10 +74,16 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
         if (expanded) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val scale = minOf(size.width / NDS_WIDTH, size.height / NDS_HEIGHT)
+                val (padLeft, padTop, padRight, padBottom) = padding
+                val totalWidth = NDS_WIDTH + padLeft + padRight
+                val totalHeight = NDS_HEIGHT + padTop + padBottom
+                val scale = minOf(size.width / totalWidth, size.height / totalHeight)
                 if (scale > 0f) {
-                    val offsetX = (size.width - NDS_WIDTH * scale) / 2f
-                    val offsetY = (size.height - NDS_HEIGHT * scale) / 2f
+                    // The game screen's own (0,0) still needs to land where
+                    // it visually is -- shift by the left/top padding so
+                    // extra space appears around it, not shrinking it.
+                    val offsetX = (size.width - totalWidth * scale) / 2f + padLeft * scale
+                    val offsetY = (size.height - totalHeight * scale) / 2f + padTop * scale
                     drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
                 }
             }

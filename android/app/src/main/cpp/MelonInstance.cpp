@@ -721,6 +721,11 @@ void MelonInstance::notifyLuaFormsFormClosed(int handle)
     luaScriptManager->notifyFormsFormClosed(handle);
 }
 
+void MelonInstance::getLuaScreenPadding(int& left, int& top, int& right, int& bottom)
+{
+    luaScriptManager->getScreenPadding(left, top, right, bottom);
+}
+
 void MelonInstance::updateRenderer()
 {
     Renderer newRenderer = currentConfiguration->renderer;

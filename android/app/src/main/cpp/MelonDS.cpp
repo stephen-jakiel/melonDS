@@ -440,6 +440,13 @@ namespace MelonDSAndroid
             instance->notifyLuaFormsFormClosed(handle);
     }
 
+    void getLuaScreenPadding(int& left, int& top, int& right, int& bottom)
+    {
+        left = top = right = bottom = 0;
+        if (instance)
+            instance->getLuaScreenPadding(left, top, right, bottom);
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)

@@ -86,6 +86,7 @@ namespace MelonDSAndroid {
     extern std::vector<FormsRequest> takeLuaFormsCommands();
     extern void notifyLuaFormsClick(int handle);
     extern void notifyLuaFormsFormClosed(int handle);
+    extern void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
 }
 
 #endif //MELONDS_MELONDS_H
