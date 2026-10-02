@@ -239,25 +239,16 @@ void LuaScriptManager::notifyFormsFormClosed(int handle)
 
 FormsResult LuaScriptManager::callFormsBridge(FormsRequest req)
 {
-    // TEMPORARY diagnostic (Phase 3 bring-up): if the bridge ever hangs,
-    // whatever this last logged is the call that never got answered.
-    logf("forms bridge: request op=%d handle=%d text=%s", (int)req.op, req.handle, req.text.c_str());
     {
         std::lock_guard<std::mutex> lock(formsBridgeMutex);
         pendingFormsRequest = std::move(req);
     }
     sem_wait(&formsResultReady);
-    logf("forms bridge: response received");
     return formsResult;
 }
 
 void LuaScriptManager::queueFormsCommand(const FormsRequest& req)
 {
-    // TEMPORARY diagnostic (Phase 3 bring-up): throttled so drawing-heavy
-    // scripts don't flood logcat, but enough to tell whether forms.* is
-    // doing *anything* after the point where blocking calls stop showing up.
-    if (frameCount % 30 == 0)
-        logf("forms bridge: command op=%d handle=%d", (int)req.op, req.handle);
     std::lock_guard<std::mutex> lock(formsCommandsMutex);
     formsCommands.push_back(req);
 }

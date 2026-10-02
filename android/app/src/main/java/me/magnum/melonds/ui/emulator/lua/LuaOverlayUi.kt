@@ -94,7 +94,7 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
         ) {
             Icon(
-                imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                imageVector = if (expanded) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                 contentDescription = null,
                 tint = Color.White,
             )
