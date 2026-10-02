@@ -166,7 +166,20 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, settingsRepository: SettingsRepo
                                             val outputFile = File(outputPath)
                                             val root = DocumentFile.fromTreeUri(context, exportDirUri)
                                             if (root != null) {
-                                                root.findFile(outputFile.name)?.delete()
+                                                // Keep exactly one backup generation: the export
+                                                // that was current before this one becomes
+                                                // "-previous" (replacing whatever was already
+                                                // there), rather than being lost outright --
+                                                // lets you fall back a seed if the latest one
+                                                // turns out to be a dud, without accumulating an
+                                                // ever-growing pile of old exports.
+                                                val previousName = if (outputFile.extension.isNotEmpty()) {
+                                                    "${outputFile.nameWithoutExtension}-previous.${outputFile.extension}"
+                                                } else {
+                                                    "${outputFile.name}-previous"
+                                                }
+                                                root.findFile(previousName)?.delete()
+                                                root.findFile(outputFile.name)?.renameTo(previousName)
                                                 val dest = root.createFile("application/octet-stream", outputFile.name)
                                                 if (dest != null) {
                                                     context.contentResolver.openOutputStream(dest.uri)?.use { out ->
