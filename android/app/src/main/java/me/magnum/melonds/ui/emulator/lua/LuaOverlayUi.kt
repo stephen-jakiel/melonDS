@@ -181,8 +181,18 @@ fun DrawScope.drawLuaCommandsAt(commands: List<LuaDrawCommand>, imageCache: Muta
                     }
                 }
                 LuaDrawCommand.KIND_PIXEL -> {
+                    // A single NDS-native pixel should cover `scale` device
+                    // pixels at the overlay's current zoom -- drawPoint()'s
+                    // dot size doesn't scale with it (stays a fixed ~1px
+                    // regardless), which made anything built pixel-by-pixel
+                    // out of many drawPixel() calls (e.g. this tracker's
+                    // icons, via IconDrawer.drawIcon) a near-invisible
+                    // scatter of specks once zoomed in. A filled square of
+                    // side `scale` is what "one pixel" actually means here.
                     if (cmd.color.hasAlpha()) {
-                        drawPoint(offsetX + cmd.x1 * scale, offsetY + cmd.y1 * scale, Paint().apply { color = cmd.color })
+                        val left = offsetX + cmd.x1 * scale
+                        val top = offsetY + cmd.y1 * scale
+                        drawRect(left, top, left + scale, top + scale, Paint().apply { color = cmd.color; style = Paint.Style.FILL })
                     }
                 }
                 LuaDrawCommand.KIND_ELLIPSE -> {
