@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
@@ -31,11 +32,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import me.magnum.melonds.MelonEmulator
 import me.magnum.melonds.domain.model.LuaDrawCommand
+import kotlin.math.roundToInt
 
 // NDS-native coordinate space the gui.* overlay is drawn in: a standard
 // top-then-bottom dual-screen layout (256 wide, top screen y=[0,192),
@@ -98,14 +101,19 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 // right of the game screen, so anything that doesn't fit is
                 // the (less important) game-aligned left portion, not it.
                 val density = LocalDensity.current
+                val availableWidthPx = with(density) { maxWidth.toPx() }
                 val availableHeightPx = with(density) { maxHeight.toPx() }
                 val scale = if (totalHeight > 0f) (availableHeightPx / totalHeight) * OVERLAY_SCALE_FACTOR else 1f
-                val canvasWidthDp = with(density) { (totalWidth * scale).toDp() }
+                val canvasWidthPx = totalWidth * scale
+                // Explicit pixel offset rather than Alignment.TopEnd: with a
+                // child wider than its parent, alignment here didn't anchor
+                // the right edges together the way it should have.
+                val xOffsetPx = (availableWidthPx - canvasWidthPx).roundToInt()
 
                 Canvas(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .requiredWidth(canvasWidthDp)
+                        .offset { IntOffset(xOffsetPx, 0) }
+                        .requiredWidth(with(density) { canvasWidthPx.toDp() })
                         .requiredHeight(with(density) { availableHeightPx.toDp() }),
                 ) {
                     val offsetX = padLeft * scale
