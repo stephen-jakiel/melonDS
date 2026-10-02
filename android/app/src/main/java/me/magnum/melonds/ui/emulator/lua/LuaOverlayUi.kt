@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -110,16 +113,42 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 // child wider than its parent, alignment here didn't anchor
                 // the right edges together the way it should have.
                 val xOffsetPx = (availableWidthPx - canvasWidthPx).roundToInt()
+                val contentOffsetX = padLeft * scale
+                val contentOffsetY = padTop * scale
+
+                // pointerInput below only READS position/pressed state and
+                // never calls change.consume() -- it must stay a passive
+                // observer, not steal touches from the real DS touchscreen
+                // handling (a separate, non-Compose view) underneath.
+                // rememberUpdatedState lets that long-lived gesture loop
+                // (keyed on Unit, so it doesn't restart every recomposition)
+                // see the current scale/offsets rather than stale ones from
+                // whenever it first launched.
+                val latestScale = rememberUpdatedState(scale)
+                val latestContentOffsetX = rememberUpdatedState(contentOffsetX)
+                val latestContentOffsetY = rememberUpdatedState(contentOffsetY)
 
                 Canvas(
                     modifier = Modifier
                         .offset { IntOffset(xOffsetPx, 0) }
                         .requiredWidth(with(density) { canvasWidthPx.toDp() })
-                        .requiredHeight(with(density) { availableHeightPx.toDp() }),
+                        .requiredHeight(with(density) { availableHeightPx.toDp() })
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull() ?: continue
+                                    // change.position is already local to this Canvas
+                                    // (i.e. post-offset/post-size), so only the drawing
+                                    // content offset needs inverting here, not xOffsetPx.
+                                    val logicalX = (change.position.x - latestContentOffsetX.value) / latestScale.value
+                                    val logicalY = (change.position.y - latestContentOffsetY.value) / latestScale.value
+                                    MelonEmulator.setLuaMousePosition(logicalX, logicalY, change.pressed)
+                                }
+                            }
+                        },
                 ) {
-                    val offsetX = padLeft * scale
-                    val offsetY = padTop * scale
-                    drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
+                    drawLuaCommandsAt(commands, imageCache, contentOffsetX, contentOffsetY, scale)
                 }
             }
         }

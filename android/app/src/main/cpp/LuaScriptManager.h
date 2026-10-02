@@ -181,6 +181,18 @@ public:
         bottom = luaPadBottom.load();
     }
 
+    // Called from Kotlin as the user's finger moves over the gui.* overlay
+    // area (NOT the real DS touchscreen -- this is purely so input.getmouse()
+    // has something real to report, e.g. for this tracker's own gear-icon
+    // click detection). x/y are in the same NDS-native coordinate space as
+    // everything else here.
+    void setMousePosition(float x, float y, bool pressed)
+    {
+        mouseX.store(x);
+        mouseY.store(y);
+        mousePressed.store(pressed);
+    }
+
 private:
     void threadMain(std::string scriptPath);
     void registerAPI();
@@ -201,7 +213,7 @@ private:
     static int l_emu_frameadvance(lua_State* L);
     static int l_emu_framecount(lua_State* L);
 
-    static int l_input_getmouse_stub(lua_State* L);
+    static int l_input_getmouse(lua_State* L);
 
     static int l_forms_newform(lua_State* L);
     static int l_forms_button(lua_State* L);
@@ -366,6 +378,13 @@ private:
     std::atomic<int> luaPadTop {0};
     std::atomic<int> luaPadRight {0};
     std::atomic<int> luaPadBottom {0};
+
+    // Set via setMousePosition(), read by l_input_getmouse(). x/y in the
+    // gui.* overlay's own NDS-native coordinate space (written from the
+    // Kotlin/main thread, read from the script thread).
+    std::atomic<float> mouseX {0};
+    std::atomic<float> mouseY {0};
+    std::atomic<bool> mousePressed {false};
 };
 
 }

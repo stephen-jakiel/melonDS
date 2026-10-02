@@ -87,6 +87,7 @@ namespace MelonDSAndroid {
     extern void notifyLuaFormsClick(int handle);
     extern void notifyLuaFormsFormClosed(int handle);
     extern void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
+    extern void setLuaMousePosition(float x, float y, bool pressed);
 }
 
 #endif //MELONDS_MELONDS_H

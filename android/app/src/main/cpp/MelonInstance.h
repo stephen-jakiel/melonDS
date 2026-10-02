@@ -87,6 +87,7 @@ public:
     void notifyLuaFormsClick(int handle);
     void notifyLuaFormsFormClosed(int handle);
     void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
+    void setLuaMousePosition(float x, float y, bool pressed);
 
 private:
     void updateRenderer();

@@ -726,6 +726,11 @@ void MelonInstance::getLuaScreenPadding(int& left, int& top, int& right, int& bo
     luaScriptManager->getScreenPadding(left, top, right, bottom);
 }
 
+void MelonInstance::setLuaMousePosition(float x, float y, bool pressed)
+{
+    luaScriptManager->setMousePosition(x, y, pressed);
+}
+
 void MelonInstance::updateRenderer()
 {
     Renderer newRenderer = currentConfiguration->renderer;

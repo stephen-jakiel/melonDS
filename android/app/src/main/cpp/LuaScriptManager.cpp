@@ -544,14 +544,11 @@ void LuaScriptManager::registerAPI()
     luaL_newlib(L, joypadFuncs);
     lua_setglobal(L, "joypad");
 
-    // input.* (mouse): no pointer device on Android -- stubbed to report a
-    // neutral "nothing happening" state for now, in the same table shape
-    // BizHawk's API returns (X/Y/Wheel/Left/Middle/Right all present), not
-    // an empty table -- scripts that unconditionally do arithmetic on
-    // e.g. mouse["Y"] (this tracker's Input.lua does) would otherwise
-    // crash on a nil field.
+    // input.* (mouse): no real pointer device on Android, but the user's
+    // finger over the gui.* overlay area stands in for one -- see
+    // setMousePosition()/l_input_getmouse().
     static const luaL_Reg inputFuncs[] = {
-        {"getmouse", l_input_getmouse_stub},
+        {"getmouse", l_input_getmouse},
         {nullptr, nullptr}
     };
     luaL_newlib(L, inputFuncs);
@@ -1250,16 +1247,29 @@ int LuaScriptManager::l_forms_refresh(lua_State* L)
     return 0;
 }
 
-int LuaScriptManager::l_input_getmouse_stub(lua_State* L)
+int LuaScriptManager::l_input_getmouse(lua_State* L)
 {
+    LuaScriptManager* mgr = self(L);
+    float x = mgr->mouseX.load();
+    float y = mgr->mouseY.load();
+    bool pressed = mgr->mousePressed.load();
+
+    // BizHawk's own NDS core reports mouse Y in a range of roughly
+    // [-384, 384] centered on the middle of the combined dual-screen view,
+    // not plain 0..384 -- confirmed from this tracker's own source
+    // (Input.lua: `y = (mouse["Y"] + 384) / 2`, applied to every reported
+    // position before use anywhere else), same convention the desktop
+    // build replicates.
+    double rawY = y * 2.0 - 384.0;
+
     lua_newtable(L);
-    lua_pushinteger(L, 0);
+    lua_pushinteger(L, (lua_Integer)llround(x));
     lua_setfield(L, -2, "X");
-    lua_pushinteger(L, 0);
+    lua_pushinteger(L, (lua_Integer)llround(rawY));
     lua_setfield(L, -2, "Y");
-    lua_pushinteger(L, 0);
+    lua_pushinteger(L, 0); // scroll wheel delta tracking not implemented
     lua_setfield(L, -2, "Wheel");
-    lua_pushboolean(L, false);
+    lua_pushboolean(L, pressed);
     lua_setfield(L, -2, "Left");
     lua_pushboolean(L, false);
     lua_setfield(L, -2, "Middle");

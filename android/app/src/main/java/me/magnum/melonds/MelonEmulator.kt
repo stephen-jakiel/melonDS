@@ -160,4 +160,6 @@ object MelonEmulator {
     external fun notifyLuaFormsFormClosed(handle: Int)
 
     external fun getLuaScreenPadding(): IntArray
+
+    external fun setLuaMousePosition(x: Float, y: Float, pressed: Boolean)
 }

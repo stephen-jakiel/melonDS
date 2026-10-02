@@ -447,6 +447,12 @@ namespace MelonDSAndroid
             instance->getLuaScreenPadding(left, top, right, bottom);
     }
 
+    void setLuaMousePosition(float x, float y, bool pressed)
+    {
+        if (instance)
+            instance->setLuaMousePosition(x, y, pressed);
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)
