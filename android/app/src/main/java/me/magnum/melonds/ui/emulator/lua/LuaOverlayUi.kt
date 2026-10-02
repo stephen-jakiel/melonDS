@@ -82,7 +82,9 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
 
     Box(modifier = modifier.fillMaxSize()) {
         if (expanded) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            // Leave room at the top for the toggle icon (below) so the
+            // overlay content doesn't sit underneath/overlap it.
+            BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(top = 56.dp)) {
                 val (padLeft, padTop, padRight, padBottom) = padding
                 val totalWidth = NDS_WIDTH + padLeft + padRight
                 val totalHeight = NDS_HEIGHT + padTop + padBottom
