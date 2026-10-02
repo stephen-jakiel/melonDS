@@ -89,6 +89,16 @@ public:
     void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
     void setLuaMousePosition(float x, float y, bool pressed);
     void requestLuaNewRun();
+    // Basename (no directory, no extension) of the most recently loaded
+    // ROM file -- e.g. "PokemonDiamond1" for ".../PokemonDiamond1.nds".
+    // Set by loadRom(). Used by gameinfo.getromname() instead of the cart
+    // header's internal title (e.g. "POKEMON D"), which several
+    // NDS-Ironmon-Tracker scripts (QuickLoader.lua, CrashRecovery.lua,
+    // RunOverScreen.lua) rely on being filename-like -- they build file
+    // paths from it directly, and QuickLoader's batch-seed mode expects a
+    // trailing sequence number that only a filename (e.g. "...1", "...2")
+    // would have.
+    const std::string& getBaseRomName() const { return baseRomName; }
 
 private:
     void updateRenderer();
@@ -107,6 +117,7 @@ private:
     std::unique_ptr<RetroAchievements::RetroAchievementsManager> retroAchievementsManager;
     std::unique_ptr<LuaScriptManager> luaScriptManager;
     std::unique_ptr<SaveManager> ndsSave;
+    std::string baseRomName;
     std::unique_ptr<SaveManager> gbaSave;
     std::unique_ptr<SaveManager> firmwareSave;
     u32 inputMask;

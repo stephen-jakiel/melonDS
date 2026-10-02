@@ -459,6 +459,11 @@ namespace MelonDSAndroid
             instance->requestLuaNewRun();
     }
 
+    std::string getBaseRomName()
+    {
+        return instance ? instance->getBaseRomName() : "";
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)

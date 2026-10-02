@@ -1402,14 +1402,49 @@ int LuaScriptManager::l_client_saveram(lua_State* L)
 
 int LuaScriptManager::l_client_closerom(lua_State* L)
 {
-    // Not implemented in Phase 1 -- this tracker doesn't call it in normal
-    // operation (desktop's audit found it only reachable from a menu this
-    // script doesn't offer).
+    // No-op: NDS-Ironmon-Tracker calls this immediately before
+    // client.openrom() (see Main.lua's loadNext()), and the cart swap
+    // l_client_openrom() below performs already fully replaces whatever's
+    // currently loaded -- there's nothing extra to eject first.
     return 0;
 }
 
 int LuaScriptManager::l_client_openrom(lua_State* L)
 {
+    const char* path = luaL_checkstring(L, 1);
+    std::string romPath(path);
+
+    // Derive the save path the same way the rest of the engine does
+    // (same basename, .sav extension, same directory as the ROM) and
+    // create a blank one if this is the first time this particular ROM
+    // file has been loaded -- MelonDSAndroid::loadRom() requires the save
+    // file to already exist, same as SramProvider.kt's normal ROM-launch
+    // path does for a never-before-played game.
+    std::string sramPath = romPath;
+    size_t dot = sramPath.find_last_of('.');
+    sramPath = (dot == std::string::npos) ? (sramPath + ".sav") : (sramPath.substr(0, dot) + ".sav");
+    FILE* existing = fopen(sramPath.c_str(), "rb");
+    if (existing)
+        fclose(existing);
+    else
+    {
+        FILE* blank = fopen(sramPath.c_str(), "wb");
+        if (blank)
+            fclose(blank);
+    }
+
+    RomGbaSlotConfigNone noGbaSlot;
+    if (MelonDSAndroid::loadRom(romPath, sramPath, &noGbaSlot._base) != 0)
+    {
+        self(L)->logf("client.openrom(%s) failed to load", path);
+        return 0;
+    }
+    // MelonDSAndroid::loadRom() only parses the ROM and swaps the cart in
+    // (same as a mid-session EmuInstance::loadROM(reset=false) on desktop)
+    // -- reset() is what actually reboots the NDS core into it (direct
+    // boot setup + nds->Start()), same call this app's own in-game
+    // "Reset" option already uses.
+    MelonDSAndroid::reset();
     return 0;
 }
 
@@ -1448,13 +1483,14 @@ int LuaScriptManager::l_gameinfo_getromname(lua_State* L)
         return 1;
     }
 
-    char buf[13] = {0};
-    memcpy(buf, cart->GetHeader().GameTitle, 12);
-    std::string title(buf);
-    // Trim trailing whitespace/NULs, matching the desktop build's QString::trimmed().
-    while (!title.empty() && (unsigned char)title.back() <= ' ')
-        title.pop_back();
-    lua_pushstring(L, title.empty() ? "Null" : title.c_str());
+    // The loaded ROM file's basename (no directory, no extension), NOT the
+    // cart header's internal title (e.g. "POKEMON D") -- several
+    // NDS-Ironmon-Tracker scripts (QuickLoader.lua, CrashRecovery.lua,
+    // RunOverScreen.lua) build file paths directly from this value and
+    // QuickLoader's batch-seed mode expects a trailing sequence number a
+    // fixed internal title could never have. See MelonInstance::baseRomName.
+    std::string name = MelonDSAndroid::getBaseRomName();
+    lua_pushstring(L, name.empty() ? "Null" : name.c_str());
     return 1;
 }
 

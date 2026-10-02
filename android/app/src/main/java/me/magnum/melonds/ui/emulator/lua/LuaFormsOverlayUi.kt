@@ -1,6 +1,10 @@
 package me.magnum.melonds.ui.emulator.lua
 
+import android.net.Uri
 import android.os.Environment
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -26,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -314,8 +319,43 @@ private fun LuaFormsFileBrowserDialog(initialDirHint: String, onPicked: (String)
         if (hinted.isDirectory) hinted else root
     }
     var currentDir by remember { mutableStateOf(startDir) }
+    // Bumped after an import finishes to force `entries` to re-list the
+    // (now scoped-storage-inaccessible-from-outside) directory, since
+    // plain File.listFiles() isn't itself observable by Compose.
+    var refreshTrigger by remember { mutableStateOf(0) }
+    var importing by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
-    val entries = remember(currentDir) {
+    // Scoped storage blocks ordinary file manager apps from browsing into
+    // (or copying files into) this app's private external files dir -- the
+    // only location this dialog's plain File-based browser can read
+    // without the heavy, Play-Store-restricted MANAGE_EXTERNAL_STORAGE
+    // permission. The system document picker (SAF), launched here, is
+    // exempt from that restriction and can reach anywhere (Downloads,
+    // Google Drive, SD card, ...), so it's used to copy files in rather
+    // than trying to widen this dialog's own browsing root.
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+        onResult = { uris ->
+            if (uris.isNotEmpty()) {
+                importing = true
+                val targetDir = currentDir
+                coroutineScope.launch(Dispatchers.IO) {
+                    for (uri in uris) {
+                        try {
+                            importDocumentInto(context, uri, targetDir)
+                        } catch (e: Exception) {
+                            android.util.Log.e("LuaFormsOverlay", "Failed to import $uri into $targetDir", e)
+                        }
+                    }
+                    importing = false
+                    refreshTrigger++
+                }
+            }
+        },
+    )
+
+    val entries = remember(currentDir, refreshTrigger) {
         currentDir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })) ?: emptyList()
     }
     val canGoUp = currentDir != root && currentDir.parentFile != null
@@ -341,11 +381,37 @@ private fun LuaFormsFileBrowserDialog(initialDirHint: String, onPicked: (String)
                         }.padding(8.dp),
                     )
                 }
+                if (importing) {
+                    item { Text(text = "Importing...", modifier = Modifier.fillMaxWidth().padding(8.dp)) }
+                }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            // Imports into whatever folder is currently being browsed --
+            // navigate into (or stay at) the desired destination first.
+            Button(onClick = { importLauncher.launch(arrayOf("*/*")) }, enabled = !importing) {
+                Text("Import Files...")
+            }
+        },
         dismissButton = { Button(onClick = onCancel) { Text("Cancel") } },
     )
+}
+
+private fun importDocumentInto(context: android.content.Context, uri: Uri, targetDir: File) {
+    val name = queryDisplayName(context, uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "imported_file"
+    if (!targetDir.exists())
+        targetDir.mkdirs()
+    val outFile = File(targetDir, name)
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        outFile.outputStream().use { output -> input.copyTo(output) }
+    }
+}
+
+private fun queryDisplayName(context: android.content.Context, uri: Uri): String? {
+    return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+    }
 }
 
 // --- android.* (not part of BizHawk's API) ---------------------------------

@@ -93,6 +93,43 @@ MelonInstance::~MelonInstance()
     delete nds;
 }
 
+// A normal (library-driven) ROM load's romPath is often not a plain
+// filesystem path at all -- it's a SAF document ID, percent-encoded (e.g.
+// "primary%3AROMs%2FPokemon...%2FPokemonPearl1" for "primary:ROMs/
+// Pokemon.../PokemonPearl1"), which Platform::OpenFile() below already
+// knows how to resolve. Decoding it first is what lets baseRomName (see
+// its header comment) find the real last path segment instead of treating
+// the whole encoded blob as one filename -- a plain filesystem path (e.g.
+// from a Lua-driven client.openrom() call) has no '%' sequences, so
+// decoding it is a no-op and this still behaves exactly as before for that case.
+static std::string urlDecode(const std::string& in)
+{
+    std::string out;
+    out.reserve(in.size());
+    auto hexVal = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < in.size(); i++)
+    {
+        if (in[i] == '%' && i + 2 < in.size())
+        {
+            int hi = hexVal(in[i + 1]);
+            int lo = hexVal(in[i + 2]);
+            if (hi >= 0 && lo >= 0)
+            {
+                out += (char) ((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        out += in[i];
+    }
+    return out;
+}
+
 bool MelonInstance::loadRom(std::string romPath, std::string sramPath)
 {
     unique_ptr<u8[]> romData;
@@ -157,6 +194,12 @@ bool MelonInstance::loadRom(std::string romPath, std::string sramPath)
 
     nds->SetNDSCart(std::move(cart));
     ndsSave = std::make_unique<SaveManager>(sramPath);
+
+    std::string decodedPath = urlDecode(romPath);
+    size_t slash = decodedPath.find_last_of("/\\");
+    std::string fileName = (slash == std::string::npos) ? decodedPath : decodedPath.substr(slash + 1);
+    size_t dot = fileName.find_last_of('.');
+    baseRomName = (dot == std::string::npos) ? fileName : fileName.substr(0, dot);
 
     return true;
 }

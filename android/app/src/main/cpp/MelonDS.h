@@ -89,6 +89,7 @@ namespace MelonDSAndroid {
     extern void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
     extern void setLuaMousePosition(float x, float y, bool pressed);
     extern void requestLuaNewRun();
+    extern std::string getBaseRomName();
 }
 
 #endif //MELONDS_MELONDS_H
