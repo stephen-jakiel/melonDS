@@ -377,86 +377,91 @@ namespace MelonDSAndroid
     void startLuaScript(std::string path)
     {
         if (instance)
-            instance->startLuaScript(path);
+            instance->getLuaScriptManager()->start(path);
     }
 
     void stopLuaScript()
     {
         if (instance)
-            instance->stopLuaScript();
+            instance->getLuaScriptManager()->stop();
     }
 
     bool isLuaScriptActive()
     {
-        return instance && instance->isLuaScriptActive();
+        return instance && instance->getLuaScriptManager()->isActive();
     }
 
     bool waitForLuaStepRequest()
     {
-        return instance->waitForLuaStepRequest();
+        return instance->getLuaScriptManager()->waitForStepRequest();
     }
 
     void signalLuaStepComplete()
     {
-        instance->signalLuaStepComplete();
+        instance->getLuaScriptManager()->signalStepComplete();
     }
 
     std::vector<LuaDrawCommand> getLuaDrawCommands()
     {
         if (!instance)
             return {};
-        return instance->getLuaDrawCommands();
+        return instance->getLuaScriptManager()->getDrawCommands();
     }
 
     std::optional<FormsRequest> pollLuaFormsRequest()
     {
         if (!instance)
             return std::nullopt;
-        return instance->pollLuaFormsRequest();
+        return instance->getLuaScriptManager()->pollFormsRequest();
     }
 
     void deliverLuaFormsResult(FormsResult result)
     {
         if (instance)
-            instance->deliverLuaFormsResult(std::move(result));
+            instance->getLuaScriptManager()->deliverFormsResult(std::move(result));
     }
 
     std::vector<FormsRequest> takeLuaFormsCommands()
     {
         if (!instance)
             return {};
-        return instance->takeLuaFormsCommands();
+        return instance->getLuaScriptManager()->takeFormsCommands();
     }
 
     void notifyLuaFormsClick(int handle)
     {
         if (instance)
-            instance->notifyLuaFormsClick(handle);
+            instance->getLuaScriptManager()->notifyFormsClick(handle);
     }
 
     void notifyLuaFormsFormClosed(int handle)
     {
         if (instance)
-            instance->notifyLuaFormsFormClosed(handle);
+            instance->getLuaScriptManager()->notifyFormsFormClosed(handle);
     }
 
     void getLuaScreenPadding(int& left, int& top, int& right, int& bottom)
     {
         left = top = right = bottom = 0;
         if (instance)
-            instance->getLuaScreenPadding(left, top, right, bottom);
+            instance->getLuaScriptManager()->getScreenPadding(left, top, right, bottom);
     }
 
     void setLuaMousePosition(float x, float y, bool pressed)
     {
         if (instance)
-            instance->setLuaMousePosition(x, y, pressed);
+            instance->getLuaScriptManager()->setMousePosition(x, y, pressed);
     }
 
     void requestLuaNewRun()
     {
         if (instance)
-            instance->requestLuaNewRun();
+            instance->getLuaScriptManager()->requestNewRun();
+    }
+
+    bool isLuaOverlayScrollEnabled()
+    {
+        return instance && instance->getLuaScriptManager()->isOverlayScrollEnabled();
     }
 
     std::string getBaseRomName()

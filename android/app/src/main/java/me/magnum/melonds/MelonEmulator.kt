@@ -164,4 +164,6 @@ object MelonEmulator {
     external fun setLuaMousePosition(x: Float, y: Float, pressed: Boolean)
 
     external fun requestLuaNewRun()
+
+    external fun isLuaOverlayScrollEnabled(): Boolean
 }

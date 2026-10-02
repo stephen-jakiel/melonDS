@@ -211,6 +211,16 @@ public:
     // side effect on the actual running game.
     void requestNewRun() { newRunRequested.store(true); }
 
+    // Whether the gui.* overlay should let the user manually drag it
+    // horizontally right now -- set (every frame, like
+    // client.SetGameExtraPadding()) via android.setOverlayScrollEnabled()
+    // by whichever specific screens need it (this tracker's Statistics and
+    // Log Viewer draw real content into the region the overlay otherwise
+    // sacrifices off-screen to keep its main panel visible); off by
+    // default so dragging isn't available on every screen just because
+    // the overlay is technically wider than the viewport on all of them.
+    bool isOverlayScrollEnabled() const { return overlayScrollEnabled.load(); }
+
 private:
     void threadMain(std::string scriptPath);
     void registerAPI();
@@ -348,6 +358,7 @@ private:
     static int l_android_downloadandextractupdate(lua_State* L);
     static int l_android_openurl(lua_State* L);
     static int l_android_consumenewrunrequested(lua_State* L);
+    static int l_android_setoverlayscrollenabled(lua_State* L);
 
     melonDS::NDS* nds;
     const uint32_t* inputMask;
@@ -415,6 +426,10 @@ private:
     // Set via requestNewRun() (Kotlin, on the overlay's "new run" icon tap),
     // test-and-cleared by l_android_consumenewrunrequested().
     std::atomic<bool> newRunRequested {false};
+
+    // Set (every frame) by l_android_setoverlayscrollenabled(), read by
+    // isOverlayScrollEnabled().
+    std::atomic<bool> overlayScrollEnabled {false};
 };
 
 }

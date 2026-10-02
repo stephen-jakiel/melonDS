@@ -611,6 +611,12 @@ Java_me_magnum_melonds_MelonEmulator_requestLuaNewRun(JNIEnv* env, jobject thiz)
     MelonDSAndroid::requestLuaNewRun();
 }
 
+JNIEXPORT jboolean JNICALL
+Java_me_magnum_melonds_MelonEmulator_isLuaOverlayScrollEnabled(JNIEnv* env, jobject thiz)
+{
+    return (jboolean) MelonDSAndroid::isLuaOverlayScrollEnabled();
+}
+
 JNIEXPORT jintArray JNICALL
 Java_me_magnum_melonds_MelonEmulator_getLuaScreenPadding(JNIEnv* env, jobject thiz)
 {

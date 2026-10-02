@@ -582,6 +582,7 @@ void LuaScriptManager::registerAPI()
         {"downloadAndExtractUpdate", l_android_downloadandextractupdate},
         {"openUrl", l_android_openurl},
         {"consumeNewRunRequested", l_android_consumenewrunrequested},
+        {"setOverlayScrollEnabled", l_android_setoverlayscrollenabled},
         {nullptr, nullptr}
     };
     luaL_newlib(L, androidFuncs);
@@ -1712,6 +1713,14 @@ int LuaScriptManager::l_android_consumenewrunrequested(lua_State* L)
     bool wasRequested = mgr->newRunRequested.exchange(false);
     lua_pushboolean(L, wasRequested);
     return 1;
+}
+
+int LuaScriptManager::l_android_setoverlayscrollenabled(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    bool enabled = lua_toboolean(L, 1);
+    mgr->overlayScrollEnabled.store(enabled);
+    return 0;
 }
 
 }

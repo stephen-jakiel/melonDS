@@ -7,6 +7,9 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +62,15 @@ private const val POLL_INTERVAL_MS = 33L // ~30fps, independent of core framerat
 // Tunable "how much of the available height to fill" factor for the gui.*
 // overlay -- 1.0 fills it edge-to-edge, which read as too large in practice.
 private const val OVERLAY_SCALE_FACTOR = 0.65f
+// Extra slack (NDS-space units) added to the drag range beyond exactly
+// "canvas x=0 at screen x=0" -- some screens draw content a little past
+// their box's nominal left edge, which a hard clamp at precisely x=0
+// leaves just out of reach. This tracker's Statistics bar graph is the
+// confirmed case: both its row labels AND a per-row count further left
+// of them land well negative (100 units of buffer still wasn't enough to
+// reach the count). Padding generously rather than hand-deriving the
+// exact figure through several layers of nested Lua frame math.
+private const val EXTRA_DRAG_BUFFER_NDS_UNITS = 220f
 
 /**
  * Renders a running Lua script's gui.draw*() overlay on top of the game,
@@ -76,12 +88,21 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
     var expanded by rememberSaveable(isScriptRunning) { mutableStateOf(true) }
     var commands by remember { mutableStateOf<List<LuaDrawCommand>>(emptyList()) }
     var padding by remember { mutableStateOf(IntArray(4)) } // left, top, right, bottom
+    // Opt-in signal (android.setOverlayScrollEnabled(), re-asserted every
+    // frame same as client.SetGameExtraPadding()) from specific screens
+    // that draw real content into the region the overlay otherwise
+    // sacrifices off-screen -- this tracker's Statistics and Log Viewer.
+    // Off by default: the overlay is technically wider than the viewport
+    // on every screen (that's why it's right-anchored at all), but most
+    // screens don't need dragging since nothing of theirs lives over there.
+    var scrollEnabled by remember { mutableStateOf(false) }
     val imageCache = remember { mutableMapOf<String, Bitmap?>() }
 
     LaunchedEffect(Unit) {
         while (isActive) {
             commands = MelonEmulator.getLuaDrawCommands().asList()
             padding = MelonEmulator.getLuaScreenPadding()
+            scrollEnabled = MelonEmulator.isLuaOverlayScrollEnabled()
             delay(POLL_INTERVAL_MS)
         }
     }
@@ -104,7 +125,11 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 // keeps content a sensible size; right-aligned (below) since
                 // the padded area this tracker actually uses sits to the
                 // right of the game screen, so anything that doesn't fit is
-                // the (less important) game-aligned left portion, not it.
+                // the (less important) game-aligned left portion, not it
+                // *for most screens* -- a few (this tracker's Statistics and
+                // Log Viewer) draw their real content into the game-aligned
+                // side instead, so that side is never fully hidden: it's
+                // draggable into view instead of being cut off outright.
                 val density = LocalDensity.current
                 val availableWidthPx = with(density) { maxWidth.toPx() }
                 val availableHeightPx = with(density) { maxHeight.toPx() }
@@ -113,9 +138,37 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 // Explicit pixel offset rather than Alignment.TopEnd: with a
                 // child wider than its parent, alignment here didn't anchor
                 // the right edges together the way it should have.
-                val xOffsetPx = (availableWidthPx - canvasWidthPx).roundToInt()
+                //
+                // This base offset is recomputed fresh from BoxWithConstraints'
+                // own measurements every recomposition (same as it always
+                // was) -- the one-time manual drag adjustment below is kept
+                // entirely separate from it (and always starts at a constant
+                // 0f) specifically so it can never capture a stale/wrong
+                // value from an unsettled first measurement pass the way a
+                // single remembered combined offset could.
+                val baseXOffsetPx = availableWidthPx - canvasWidthPx
                 val contentOffsetX = padLeft * scale
                 val contentOffsetY = padTop * scale
+
+                // Manual horizontal pan on top of the base (right-anchored)
+                // position, so the game-aligned side is reachable by
+                // dragging instead of only ever being cut off. Resets to 0
+                // (i.e. back to the default right-anchored view) whenever
+                // totalWidth changes -- padding changing means the script
+                // switched screens, so this is "every screen opens at its
+                // normal default look" rather than carrying a drag position
+                // from a totally different screen's layout onto this one.
+                var dragOffsetPx by remember(totalWidth) { mutableStateOf(0f) }
+                // Gated on the explicit opt-in signal (see scrollEnabled
+                // above), not on whether content technically overflows --
+                // that's true on every screen given how this overlay is
+                // scaled/anchored, so it can't tell "normal screen" from
+                // "Statistics" apart on its own.
+                val maxDragPx = if (scrollEnabled) -baseXOffsetPx + EXTRA_DRAG_BUFFER_NDS_UNITS * scale else 0f
+                val draggableState = rememberDraggableState { delta ->
+                    dragOffsetPx = (dragOffsetPx + delta).coerceIn(0f, maxDragPx)
+                }
+                val xOffsetPx = (baseXOffsetPx + dragOffsetPx).roundToInt()
 
                 // pointerInput below only READS position/pressed state and
                 // never calls change.consume() -- it must stay a passive
@@ -134,6 +187,11 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                         .offset { IntOffset(xOffsetPx, 0) }
                         .requiredWidth(with(density) { canvasWidthPx.toDp() })
                         .requiredHeight(with(density) { availableHeightPx.toDp() })
+                        // Only attached when there's actually somewhere to
+                        // drag to -- on every screen that already fits
+                        // (the common case), this gesture recognizer would
+                        // otherwise sit on top of taps for no reason.
+                        .then(if (maxDragPx > 0f) Modifier.draggable(state = draggableState, orientation = Orientation.Horizontal) else Modifier)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {

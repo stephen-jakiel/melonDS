@@ -74,21 +74,14 @@ public:
     std::string getRichPresenceStatus();
     std::vector<RetroAchievements::RARuntimeAchievement> getRuntimeAchievements();
 
-    void startLuaScript(const std::string& path);
-    void stopLuaScript();
-    bool isLuaScriptActive();
-    bool waitForLuaStepRequest();
-    void signalLuaStepComplete();
-    std::vector<LuaDrawCommand> getLuaDrawCommands();
+    // Matches desktop's EmuInstance, which exposes its own LuaScriptManager
+    // (luaScript) as a plain public member rather than a forwarding method
+    // per call -- callers (MelonDS.cpp) reach through this directly, e.g.
+    // instance->getLuaScriptManager()->start(path). Keeps this class's
+    // footprint in a file upstream actively maintains to just this one
+    // accessor instead of ~13 one-line wrappers.
+    LuaScriptManager* getLuaScriptManager() const { return luaScriptManager.get(); }
 
-    std::optional<FormsRequest> pollLuaFormsRequest();
-    void deliverLuaFormsResult(FormsResult result);
-    std::vector<FormsRequest> takeLuaFormsCommands();
-    void notifyLuaFormsClick(int handle);
-    void notifyLuaFormsFormClosed(int handle);
-    void getLuaScreenPadding(int& left, int& top, int& right, int& bottom);
-    void setLuaMousePosition(float x, float y, bool pressed);
-    void requestLuaNewRun();
     // Basename (no directory, no extension) of the most recently loaded
     // ROM file -- e.g. "PokemonDiamond1" for ".../PokemonDiamond1.nds".
     // Set by loadRom(). Used by gameinfo.getromname() instead of the cart
