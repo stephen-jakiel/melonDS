@@ -97,7 +97,7 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 val scale = if (totalHeight > 0f) availableHeightPx / totalHeight else 1f
                 val canvasWidthDp = with(density) { (totalWidth * scale).toDp() }
 
-                Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                Box(modifier = Modifier.fillMaxHeight().horizontalScroll(rememberScrollState())) {
                     Canvas(modifier = Modifier.width(canvasWidthDp).fillMaxHeight()) {
                         val offsetX = padLeft * scale
                         val offsetY = padTop * scale
