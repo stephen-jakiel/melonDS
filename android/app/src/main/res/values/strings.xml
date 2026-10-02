@@ -190,6 +190,9 @@
     <string name="cache_size">Cache size: %s</string>
     <string name="cache_size_calculating">Cache size: calculating…</string>
     <string name="rom_search_directory">Search directory</string>
+    <string name="randomizer_auto_export">Auto-export randomized ROM</string>
+    <string name="randomizer_auto_export_summary">Copy each freshly-randomized ROM to a public folder so it can be selected from the normal ROM picker (e.g. to resume after fully closing the app)</string>
+    <string name="randomizer_export_directory">Randomizer export directory</string>
     <string name="use_custom_bios">Use custom BIOS and firmware</string>
     <string name="console_type">Default system</string>
     <string name="internal_firmware_settings">Internal firmware settings</string>

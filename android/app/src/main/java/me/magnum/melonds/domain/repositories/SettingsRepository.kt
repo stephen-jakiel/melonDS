@@ -26,6 +26,9 @@ interface SettingsRepository {
     fun getRomIconFiltering(): RomIconFiltering
     fun getRomCacheMaxSize(): SizeUnit
 
+    fun isRandomizerAutoExportEnabled(): Boolean
+    fun getRandomizerExportDirectory(): Uri?
+
     fun getDefaultConsoleType(): ConsoleType
     fun getFirmwareConfiguration(): FirmwareConfiguration
     fun useCustomBios(): Boolean

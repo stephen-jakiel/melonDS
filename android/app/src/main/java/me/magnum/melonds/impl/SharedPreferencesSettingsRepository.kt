@@ -218,6 +218,16 @@ class SharedPreferencesSettingsRepository(
         // Cache size is 128MB * (cacheSizeStepPreference ^ 2)
         return SizeUnit.MB(128) * 2.toDouble().pow(cacheSizeStepPreference).toLong()
     }
+
+    override fun isRandomizerAutoExportEnabled(): Boolean {
+        return preferences.getBoolean("randomizer_auto_export", false)
+    }
+
+    override fun getRandomizerExportDirectory(): Uri? {
+        val dirPreference = preferences.getStringSet("randomizer_export_dir", null)?.firstOrNull()
+        return dirPreference?.toUri()
+    }
+
     override fun getDefaultConsoleType(): ConsoleType {
         val consoleTypePreference = preferences.getString("console_type", "ds")!!
         return enumValueOfIgnoreCase(consoleTypePreference)

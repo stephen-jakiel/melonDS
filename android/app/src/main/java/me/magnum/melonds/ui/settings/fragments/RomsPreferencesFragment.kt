@@ -40,6 +40,7 @@ class RomsPreferencesFragment : BasePreferenceFragment(), PreferenceFragmentTitl
         clearRomCachePreference = findPreference("rom_cache_clear")!!
 
         helper.setupStoragePickerPreference(findPreference("rom_search_dirs")!!)
+        helper.setupStoragePickerPreference(findPreference("randomizer_export_dir")!!)
 
         updateMaxCacheSizePreferenceSummary(cacheSizePreference, cacheSizePreference.value)
 

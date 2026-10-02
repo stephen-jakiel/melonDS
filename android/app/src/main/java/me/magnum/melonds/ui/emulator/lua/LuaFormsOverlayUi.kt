@@ -45,8 +45,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.documentfile.provider.DocumentFile
 import me.magnum.melonds.MelonEmulator
 import me.magnum.melonds.domain.model.LuaFormsRequest
+import me.magnum.melonds.domain.repositories.SettingsRepository
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.io.File
 import java.net.HttpURLConnection
@@ -69,7 +71,7 @@ private class OpenFileRequest(val initialDir: String, val onPicked: (String) -> 
  * once the user actually makes a choice.
  */
 @Composable
-fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
+fun LuaFormsOverlayUi(isScriptRunning: Boolean, settingsRepository: SettingsRepository, modifier: Modifier = Modifier) {
     if (!isScriptRunning) {
         return
     }
@@ -151,6 +153,36 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                                     false
                                 }
                                 MelonEmulator.deliverLuaFormsResult(0, "", success)
+
+                                // Best-effort: this is purely a convenience copy for
+                                // resuming outside the tracker's own in-session ROM
+                                // swapping (see the randomizer_export_dir setting's
+                                // summary) -- never surface a failure here to the
+                                // Lua script, which already got its real result above.
+                                if (success && settingsRepository.isRandomizerAutoExportEnabled()) {
+                                    val exportDirUri = settingsRepository.getRandomizerExportDirectory()
+                                    if (exportDirUri != null) {
+                                        try {
+                                            val outputFile = File(outputPath)
+                                            val root = DocumentFile.fromTreeUri(context, exportDirUri)
+                                            if (root != null) {
+                                                root.findFile(outputFile.name)?.delete()
+                                                val dest = root.createFile("application/octet-stream", outputFile.name)
+                                                if (dest != null) {
+                                                    context.contentResolver.openOutputStream(dest.uri)?.use { out ->
+                                                        outputFile.inputStream().use { input -> input.copyTo(out) }
+                                                    }
+                                                } else {
+                                                    android.util.Log.e("LuaFormsOverlay", "Could not create randomizer export file for $outputPath in $exportDirUri")
+                                                }
+                                            } else {
+                                                android.util.Log.e("LuaFormsOverlay", "Randomizer export directory is no longer accessible: $exportDirUri")
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("LuaFormsOverlay", "Failed to export randomized ROM to $exportDirUri", e)
+                                        }
+                                    }
+                                }
                             }
                         }
                         LuaFormsRequest.OP_OPEN_URL -> {

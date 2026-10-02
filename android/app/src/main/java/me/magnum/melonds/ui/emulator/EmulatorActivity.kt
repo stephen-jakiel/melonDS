@@ -174,6 +174,9 @@ class EmulatorActivity : AppCompatActivity() {
     @Inject
     lateinit var appForegroundStateObserver: AppForegroundStateObserver
 
+    @Inject
+    lateinit var settingsRepository: me.magnum.melonds.domain.repositories.SettingsRepository
+
     private var presentation: ExternalPresentation? = null
     // Backed by SharedPreferences (not just an in-memory field) so a picked
     // path survives the app being reinstalled/killed, not just this Activity
@@ -385,7 +388,7 @@ class EmulatorActivity : AppCompatActivity() {
 
                 LuaOverlayUi(isScriptRunning = luaScriptRunning.value)
 
-                LuaFormsOverlayUi(isScriptRunning = luaScriptRunning.value)
+                LuaFormsOverlayUi(isScriptRunning = luaScriptRunning.value, settingsRepository = settingsRepository)
 
                 RewindWindowUi(
                     state = rewindWindowState.value,

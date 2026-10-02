@@ -36,4 +36,20 @@
             android:title="@string/clear_extracted_rom_cache"
             android:summary="@string/cache_size_calculating"
             app:iconSpaceReserved="false" />
+
+    <SwitchPreference
+            android:key="randomizer_auto_export"
+            android:title="@string/randomizer_auto_export"
+            android:summary="@string/randomizer_auto_export_summary"
+            app:iconSpaceReserved="false"
+            android:defaultValue="false" />
+
+    <me.magnum.melonds.ui.settings.preferences.StoragePickerPreference
+            android:key="randomizer_export_dir"
+            android:title="@string/randomizer_export_directory"
+            android:dependency="randomizer_auto_export"
+            app:iconSpaceReserved="false"
+            app:type="directory"
+            app:permissions="read_write"
+            app:persistPermissions="true" />
 </PreferenceScreen>
