@@ -55,6 +55,33 @@ static lua_Integer optIntArg(lua_State* L, int idx, lua_Integer def)
     return (lua_Integer)llround(luaL_checknumber(L, idx));
 }
 
+// Lua's standard os.execute()/io.popen() shell out via libc's system()/
+// posix_spawn(). On Android, calling that from an app's own sandboxed,
+// heavily multi-threaded process doesn't fail cleanly -- it SIGSEGVs
+// (confirmed via a real crash: NDS-Ironmon-Tracker's Main.lua calls
+// os.execute("pwd ...") on startup to resolve its own working directory,
+// purely as a "nice to have" for building absolute paths elsewhere --
+// the dofile()/io.open() calls that actually matter already work via our
+// own chdir() in threadMain()). Replace both with stubs that report
+// "command not available" the way Lua itself would on a platform that
+// genuinely has no shell, rather than letting the real ones crash the
+// whole process. Callers that already treat a failed command as "no
+// output produced" (as this tracker's MiscUtils.runExecuteCommand does)
+// keep working; anything that would have hard-required shelling out
+// simply can't on Android regardless.
+static int l_os_execute_stub(lua_State* L)
+{
+    lua_pushnil(L);
+    return 1;
+}
+
+static int l_io_popen_stub(lua_State* L)
+{
+    lua_pushnil(L);
+    lua_pushstring(L, "io.popen is not supported on Android");
+    return 2;
+}
+
 LuaScriptManager::LuaScriptManager(melonDS::NDS* nds, const uint32_t* inputMask) : nds(nds), inputMask(inputMask)
 {
     sem_init(&stepRequested, 0, 0);
@@ -309,6 +336,16 @@ void LuaScriptManager::threadMain(std::string scriptPath)
 
     L = luaL_newstate();
     luaL_openlibs(L);
+
+    lua_getglobal(L, "os");
+    lua_pushcfunction(L, l_os_execute_stub);
+    lua_setfield(L, -2, "execute");
+    lua_pop(L, 1);
+
+    lua_getglobal(L, "io");
+    lua_pushcfunction(L, l_io_popen_stub);
+    lua_setfield(L, -2, "popen");
+    lua_pop(L, 1);
 
     lua_pushlightuserdata(L, this);
     lua_setfield(L, LUA_REGISTRYINDEX, kSelfRegistryKey);
