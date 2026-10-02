@@ -573,6 +573,17 @@ void LuaScriptManager::registerAPI()
     };
     luaL_newlib(L, commFuncs);
     lua_setglobal(L, "comm");
+
+    // android.*: not part of BizHawk's API -- see FormsOp's comment on
+    // HttpGet/DownloadAndExtractUpdate for why these exist.
+    static const luaL_Reg androidFuncs[] = {
+        {"getScriptDirectory", l_android_getscriptdirectory},
+        {"httpGet", l_android_httpget},
+        {"downloadAndExtractUpdate", l_android_downloadandextractupdate},
+        {nullptr, nullptr}
+    };
+    luaL_newlib(L, androidFuncs);
+    lua_setglobal(L, "android");
 }
 
 int LuaScriptManager::l_print(lua_State* L)
@@ -1605,6 +1616,39 @@ int LuaScriptManager::l_comm_stub_table(lua_State* L)
 int LuaScriptManager::l_comm_stub_noop(lua_State* L)
 {
     return 0;
+}
+
+int LuaScriptManager::l_android_getscriptdirectory(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    lua_pushstring(L, mgr->scriptDir.c_str());
+    return 1;
+}
+
+int LuaScriptManager::l_android_httpget(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::HttpGet;
+    req.text = luaL_checkstring(L, 1);
+    FormsResult res = mgr->callFormsBridge(req);
+    if (res.boolResult)
+        lua_pushstring(L, res.stringResult.c_str());
+    else
+        lua_pushnil(L);
+    return 1;
+}
+
+int LuaScriptManager::l_android_downloadandextractupdate(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::DownloadAndExtractUpdate;
+    req.text = luaL_checkstring(L, 1);  // URL
+    req.text2 = luaL_checkstring(L, 2); // destination directory
+    FormsResult res = mgr->callFormsBridge(req);
+    lua_pushboolean(L, res.boolResult);
+    return 1;
 }
 
 }

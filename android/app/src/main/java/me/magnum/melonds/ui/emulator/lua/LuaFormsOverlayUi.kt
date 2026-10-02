@@ -36,11 +36,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import me.magnum.melonds.MelonEmulator
 import me.magnum.melonds.domain.model.LuaFormsRequest
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.GZIPInputStream
 import kotlin.math.roundToInt
 
 private const val POLL_INTERVAL_MS = 16L
@@ -86,26 +92,55 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
             try {
                 val req = MelonEmulator.pollLuaFormsRequest()
                 if (req != null) {
-                    if (req.op == LuaFormsRequest.OP_OPEN_FILE) {
-                        openFileRequest = OpenFileRequest(
-                            initialDir = req.text,
-                            onPicked = { path ->
-                                MelonEmulator.deliverLuaFormsResult(0, path, false)
-                                openFileRequest = null
-                            },
-                            onCancel = {
-                                MelonEmulator.deliverLuaFormsResult(0, "", false)
-                                openFileRequest = null
-                            },
-                        )
-                    } else {
-                        val result = try {
-                            LuaFormsManager.processRequest(req)
-                        } catch (e: Exception) {
-                            android.util.Log.e("LuaFormsOverlay", "Error processing forms request op=${req.op} handle=${req.handle}", e)
-                            LuaFormsResultData()
+                    when (req.op) {
+                        LuaFormsRequest.OP_OPEN_FILE -> {
+                            openFileRequest = OpenFileRequest(
+                                initialDir = req.text,
+                                onPicked = { path ->
+                                    MelonEmulator.deliverLuaFormsResult(0, path, false)
+                                    openFileRequest = null
+                                },
+                                onCancel = {
+                                    MelonEmulator.deliverLuaFormsResult(0, "", false)
+                                    openFileRequest = null
+                                },
+                            )
                         }
-                        MelonEmulator.deliverLuaFormsResult(result.intResult, result.stringResult, result.boolResult)
+                        // Network I/O: must not run on this (main-thread)
+                        // polling loop, so it's handed off to a background
+                        // coroutine that answers the bridge once it's done --
+                        // the script thread is just blocked waiting either way.
+                        LuaFormsRequest.OP_HTTP_GET -> {
+                            launch(Dispatchers.IO) {
+                                val body = try {
+                                    httpGet(req.text)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("LuaFormsOverlay", "android.httpGet(${req.text}) failed", e)
+                                    null
+                                }
+                                MelonEmulator.deliverLuaFormsResult(0, body ?: "", body != null)
+                            }
+                        }
+                        LuaFormsRequest.OP_DOWNLOAD_EXTRACT_UPDATE -> {
+                            launch(Dispatchers.IO) {
+                                val success = try {
+                                    downloadAndExtractTarGz(req.text, req.text2)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("LuaFormsOverlay", "android.downloadAndExtractUpdate(${req.text}, ${req.text2}) failed", e)
+                                    false
+                                }
+                                MelonEmulator.deliverLuaFormsResult(0, "", success)
+                            }
+                        }
+                        else -> {
+                            val result = try {
+                                LuaFormsManager.processRequest(req)
+                            } catch (e: Exception) {
+                                android.util.Log.e("LuaFormsOverlay", "Error processing forms request op=${req.op} handle=${req.handle}", e)
+                                LuaFormsResultData()
+                            }
+                            MelonEmulator.deliverLuaFormsResult(result.intResult, result.stringResult, result.boolResult)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -298,4 +333,83 @@ private fun LuaFormsFileBrowserDialog(initialDirHint: String, onPicked: (String)
         confirmButton = {},
         dismissButton = { Button(onClick = onCancel) { Text("Cancel") } },
     )
+}
+
+// --- android.* (not part of BizHawk's API) ---------------------------------
+//
+// NDS-Ironmon-Tracker's own update mechanism shells out to curl/tar/cp via
+// os.execute(), which we disable entirely on Android (it SIGSEGVs rather
+// than failing cleanly from this app's sandboxed, multi-threaded process --
+// see LuaScriptManager.cpp's l_os_execute_stub comment). These give a
+// patched TrackerUpdater.lua (see the project's Lua scripting memory for
+// exactly what's patched and why) a real way to do the same two things
+// using Android's own networking instead.
+
+private const val HTTP_CONNECT_TIMEOUT_MS = 10_000
+private const val HTTP_READ_TIMEOUT_MS = 15_000
+private const val USER_AGENT = "melonDS-android-lua"
+
+/** Must only be called from a background thread (blocking network I/O). */
+private fun httpGet(url: String): String? {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    return try {
+        connection.connectTimeout = HTTP_CONNECT_TIMEOUT_MS
+        connection.readTimeout = HTTP_READ_TIMEOUT_MS
+        connection.instanceFollowRedirects = true
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+        if (connection.responseCode !in 200..299) return null
+        connection.inputStream.bufferedReader().use { it.readText() }
+    } finally {
+        connection.disconnect()
+    }
+}
+
+// Files the original os.execute-based updater explicitly deleted post-
+// extract (see TrackerUpdater.lua's runBatchCommand) -- kept out of the
+// extracted result here for the same reason it was there.
+private val UPDATE_EXCLUDED_PATHS = setOf(".editorconfig", ".gitattributes", ".gitignore", "README.md")
+
+/**
+ * Downloads a .tar.gz (e.g. GitHub's repo archive endpoint) and extracts it
+ * into [destDir], stripping the single top-level folder GitHub's archives
+ * always wrap everything in (e.g. "NDS-Ironmon-Tracker-main/...") so files
+ * land directly in [destDir] instead of one level deeper. Must only be
+ * called from a background thread (blocking network + disk I/O).
+ */
+private fun downloadAndExtractTarGz(url: String, destDir: String): Boolean {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    try {
+        connection.connectTimeout = HTTP_CONNECT_TIMEOUT_MS
+        connection.readTimeout = 30_000
+        connection.instanceFollowRedirects = true
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+        if (connection.responseCode !in 200..299) return false
+
+        val destRoot = File(destDir)
+        GZIPInputStream(connection.inputStream).use { gzipIn ->
+            TarArchiveInputStream(gzipIn).use { tarIn ->
+                var entry = tarIn.nextTarEntry
+                while (entry != null) {
+                    val parts = entry.name.split("/", limit = 2)
+                    val relativePath = if (parts.size > 1) parts[1] else ""
+                    if (relativePath.isNotEmpty() &&
+                        relativePath !in UPDATE_EXCLUDED_PATHS &&
+                        !relativePath.startsWith(".vscode/")
+                    ) {
+                        val outFile = File(destRoot, relativePath)
+                        if (entry.isDirectory) {
+                            outFile.mkdirs()
+                        } else {
+                            outFile.parentFile?.mkdirs()
+                            outFile.outputStream().use { out -> tarIn.copyTo(out) }
+                        }
+                    }
+                    entry = tarIn.nextTarEntry
+                }
+            }
+        }
+        return true
+    } finally {
+        connection.disconnect()
+    }
 }

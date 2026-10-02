@@ -75,6 +75,15 @@ enum class FormsOp
     SetDropdownItems, SetProperty, SetLocation, SetText, Destroy, DestroyAll,
     // Fire-and-forget: picturebox drawing (handle = the picturebox's own handle)
     DrawText, DrawRectangle, DrawEllipse, DrawImage, Clear, Refresh,
+    // Blocking, Android-only (not part of BizHawk's real API, not touched
+    // by forms.* at all -- reuses this same bridge purely because it
+    // already solves "block the script thread until Kotlin finishes
+    // something asynchronous"). See the android.* Lua binding: network
+    // operations NDS-Ironmon-Tracker's patched TrackerUpdater.lua needs,
+    // since the real os.execute()-based update mechanism can't work on
+    // Android (see l_os_execute_stub's comment). Kotlin defers these to a
+    // background (IO dispatcher) coroutine before answering.
+    HttpGet, DownloadAndExtractUpdate,
 };
 
 struct FormsRequest
@@ -322,6 +331,12 @@ private:
     static int l_comm_stub_bool(lua_State* L);
     static int l_comm_stub_table(lua_State* L);
     static int l_comm_stub_noop(lua_State* L);
+
+    // android.*: Android-only additions, not part of BizHawk's API -- see
+    // the FormsOp::HttpGet/DownloadAndExtractUpdate comment above.
+    static int l_android_getscriptdirectory(lua_State* L);
+    static int l_android_httpget(lua_State* L);
+    static int l_android_downloadandextractupdate(lua_State* L);
 
     melonDS::NDS* nds;
     const uint32_t* inputMask;
