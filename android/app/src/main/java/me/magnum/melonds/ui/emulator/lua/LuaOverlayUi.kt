@@ -7,14 +7,12 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.icons.Icons
@@ -95,19 +93,24 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 // screen doesn't have -- fitting the full padded width would
                 // shrink the whole overlay (game area included) down to a
                 // cramped, barely-readable size. Scaling for height instead
-                // keeps content a sensible size and lets the padded area
-                // extend past the screen edge, reachable by scrolling.
+                // keeps content a sensible size; right-aligned (below) since
+                // the padded area this tracker actually uses sits to the
+                // right of the game screen, so anything that doesn't fit is
+                // the (less important) game-aligned left portion, not it.
                 val density = LocalDensity.current
                 val availableHeightPx = with(density) { maxHeight.toPx() }
                 val scale = if (totalHeight > 0f) (availableHeightPx / totalHeight) * OVERLAY_SCALE_FACTOR else 1f
                 val canvasWidthDp = with(density) { (totalWidth * scale).toDp() }
 
-                Box(modifier = Modifier.fillMaxHeight().horizontalScroll(rememberScrollState())) {
-                    Canvas(modifier = Modifier.width(canvasWidthDp).fillMaxHeight()) {
-                        val offsetX = padLeft * scale
-                        val offsetY = padTop * scale
-                        drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
-                    }
+                Canvas(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .width(canvasWidthDp)
+                        .fillMaxHeight(),
+                ) {
+                    val offsetX = padLeft * scale
+                    val offsetY = padTop * scale
+                    drawLuaCommandsAt(commands, imageCache, offsetX, offsetY, scale)
                 }
             }
         }
