@@ -9,10 +9,10 @@ import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.icons.Icons
@@ -105,8 +105,8 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                 Canvas(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .width(canvasWidthDp)
-                        .fillMaxHeight(),
+                        .requiredWidth(canvasWidthDp)
+                        .requiredHeight(with(density) { availableHeightPx.toDp() }),
                 ) {
                     val offsetX = padLeft * scale
                     val offsetY = padTop * scale
