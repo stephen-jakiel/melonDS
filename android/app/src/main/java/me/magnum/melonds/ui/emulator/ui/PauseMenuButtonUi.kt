@@ -3,6 +3,7 @@ package me.magnum.melonds.ui.emulator.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.icons.Icons
@@ -24,12 +25,13 @@ fun PauseMenuButtonUi(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
         IconButton(
             onClick = onClick,
-            modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(32.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.Menu,
                 contentDescription = null,
                 tint = Color.White,
+                modifier = Modifier.size(20.dp),
             )
         }
     }

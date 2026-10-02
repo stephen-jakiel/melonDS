@@ -125,6 +125,7 @@ class EmulatorActivity : AppCompatActivity() {
         const val KEY_URI = "uri"
         const val KEY_BOOT_FIRMWARE_CONSOLE = "boot_firmware_console"
         const val KEY_BOOT_FIRMWARE_ONLY = "boot_firmware_only"
+        const val KEY_LAST_LUA_SCRIPT_PATH = "last_lua_script_path"
 
         fun getRomEmulatorActivityIntent(context: Context, rom: Rom): Intent {
             return Intent(context, EmulatorActivity::class.java).apply {
@@ -173,7 +174,13 @@ class EmulatorActivity : AppCompatActivity() {
     lateinit var appForegroundStateObserver: AppForegroundStateObserver
 
     private var presentation: ExternalPresentation? = null
-    private var lastLuaScriptPath: String = ""
+    // Backed by SharedPreferences (not just an in-memory field) so a picked
+    // path survives the app being reinstalled/killed, not just this Activity
+    // instance -- otherwise it silently resets to blank on every fresh
+    // process, and starting a script with a blank path is a no-op.
+    private var lastLuaScriptPath: String
+        get() = getPreferences(MODE_PRIVATE).getString(KEY_LAST_LUA_SCRIPT_PATH, "") ?: ""
+        set(value) = getPreferences(MODE_PRIVATE).edit().putString(KEY_LAST_LUA_SCRIPT_PATH, value).apply()
 
     private lateinit var handler: Handler
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -928,9 +935,14 @@ class EmulatorActivity : AppCompatActivity() {
             .setTitle(R.string.run_lua_script)
             .setView(row)
             .setPositiveButton(R.string.start) { _, _ ->
-                lastLuaScriptPath = input.text.toString()
-                viewModel.startLuaScript(lastLuaScriptPath)
-                luaScriptRunning.value = true
+                val path = input.text.toString()
+                if (path.isBlank()) {
+                    Toast.makeText(this, R.string.lua_script_path_hint, Toast.LENGTH_LONG).show()
+                } else {
+                    lastLuaScriptPath = path
+                    viewModel.startLuaScript(path)
+                    luaScriptRunning.value = true
+                }
                 viewModel.resumeEmulator()
             }
             .setNeutralButton(R.string.stop) { _, _ ->
