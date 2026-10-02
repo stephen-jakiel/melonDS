@@ -259,3 +259,35 @@ runtime-downloaded script, so a real git-based workflow applies:
 Expect this to be low-frequency maintenance: the Gen4/Gen5 randomization
 logic is mature, and most upstream activity is new-game support (Gen8/9)
 irrelevant to melonDS.
+
+### Auto-exporting randomized ROMs/saves to public storage
+
+The randomizer's output ROM (and the `.sav` once the tracker swaps into
+it) lives in the app's own private external-files dir, which melonDS's
+normal ROM-library picker (SAF-based) can never browse into -- so a user
+who fully kills the app mid-run has no way to resume that exact seed
+through the normal UI without pulling files off via adb.
+
+Settings → ROMs has an "Auto-export randomized ROM" switch plus a
+directory picker (`randomizer_auto_export`/`randomizer_export_dir` in
+`pref_roms.xml`, reusing the same `StoragePickerPreference`/SAF-tree
+machinery as the ROM search/save-file directory settings). When enabled,
+`LuaFormsOverlayUi.kt`'s `OP_RANDOMIZE_ROM` handler copies the ROM into
+that directory right after a successful randomization; the `.sav` is
+handled separately since it changes continuously during play rather than
+being written once -- it's re-exported every 30s via the existing poll
+loop, and immediately on the Activity's `ON_PAUSE` (switching away from
+or closing the app), via a `DisposableEffect`/`LifecycleEventObserver`.
+Both share one `exportFileWithPreviousBackup()` helper that keeps exactly
+one backup generation (`<name>-previous.<ext>`) rather than overwriting
+outright or accumulating unboundedly.
+
+**Known gap, not yet fixed:** a hard kill (force-stop from Android's App
+Info screen, or the OS killing the process under memory pressure) isn't
+caught by either export trigger -- both are lifecycle-based, so up to
+~30s of save progress since the last periodic export (or whatever
+happened after the last `onPause`) can still be lost in that specific
+case. Not yet tested end-to-end on-device as of this writing -- verify
+the exported ROM/sav actually load correctly via melonDS's normal picker,
+and that the `-previous` rename behaves correctly across repeated runs,
+before relying on it.
