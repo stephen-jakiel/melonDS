@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.icons.Icons
@@ -123,14 +124,18 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
             }
         }
 
+        // Sits immediately to the right of PauseMenuButtonUi's icon (same
+        // top-left corner, same size) rather than the opposite corner, so
+        // both toggle icons are grouped together.
         IconButton(
             onClick = { expanded = !expanded },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 4.dp).size(32.dp),
         ) {
             Icon(
                 imageVector = if (expanded) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                 contentDescription = null,
                 tint = Color.White,
+                modifier = Modifier.size(20.dp),
             )
         }
     }
