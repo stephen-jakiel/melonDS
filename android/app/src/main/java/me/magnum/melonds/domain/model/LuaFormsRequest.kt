@@ -60,6 +60,7 @@ data class LuaFormsRequest(
         const val OP_HTTP_GET = 24
         const val OP_DOWNLOAD_EXTRACT_UPDATE = 25
         const val OP_OPEN_URL = 26
+        const val OP_RANDOMIZE_ROM = 27
     }
 
     override fun equals(other: Any?): Boolean {

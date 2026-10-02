@@ -138,6 +138,21 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                                 MelonEmulator.deliverLuaFormsResult(0, "", success)
                             }
                         }
+                        LuaFormsRequest.OP_RANDOMIZE_ROM -> {
+                            launch(Dispatchers.IO) {
+                                val settingsPath = req.items.getOrNull(0).orEmpty()
+                                val inputPath = req.items.getOrNull(1).orEmpty()
+                                val outputPath = req.items.getOrNull(2).orEmpty()
+                                val success = try {
+                                    val args = arrayOf("-s", settingsPath, "-i", inputPath, "-o", outputPath, "-l")
+                                    com.dabomstew.pkrandom.cli.CliRandomizer.invoke(args) == 0
+                                } catch (e: Exception) {
+                                    android.util.Log.e("LuaFormsOverlay", "android.randomizeRom($settingsPath, $inputPath, $outputPath) failed", e)
+                                    false
+                                }
+                                MelonEmulator.deliverLuaFormsResult(0, "", success)
+                            }
+                        }
                         LuaFormsRequest.OP_OPEN_URL -> {
                             val success = try {
                                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(req.text))

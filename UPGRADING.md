@@ -89,9 +89,9 @@ upstream -- treat every update as "re-apply patches," not "update and go."
    The double leading slash on the temp path avoids MSYS/Git-Bash mangling
    it into a Windows path on this machine.)
 
-### The four patch sites (as of this writing)
+### The five patch sites (as of this writing)
 
-All four are guarded by `if android ~= nil and android.<thing> ~= nil then
+All five are guarded by `if android ~= nil and android.<thing> ~= nil then
 ... else <original BizHawk behavior> end`, so a patched copy stays compatible
 if it were ever run on real BizHawk/desktop.
 
@@ -167,24 +167,94 @@ else
 end
 ```
 
-## 4. Universal Pokemon Randomizer (planned, not yet built)
+**`QuickLoader.lua`, `generateROM()`** -- the original shells out to
+`java -jar <randomizer>.jar cli ...` to run the Universal Pokemon Randomizer,
+which can't work at all on Android (no JVM/`java` binary, a harder wall than
+`os.execute()` -- see section 4 below for how this is solved instead):
+```lua
+local useNativeRandomizer = android ~= nil and android.randomizeRom ~= nil
+-- ...
+if not useNativeRandomizer then
+    paths.JARPath = quickLoadSettings.JAR_PATH  -- skip this file-existence check on Android
+end
+-- ...
+if useNativeRandomizer then
+    local success = android.randomizeRom(paths.RNQSPath, paths.ROMPath, nextRomPath)
+    if not success then
+        FormsUtils.displayError('Next ROM failed to generate.')
+        return nil
+    end
+else
+    -- ...original java -jar shellout, unchanged
+end
+```
 
-Once the in-app randomizer integration exists, it should follow the same
-pattern as the Android port (section 2), not the tracker's pattern (section
-3) -- this is vendored Java *source* compiled into the app at build time, not
-a runtime-downloaded script, so a real git-based workflow is both possible
-and worth using:
+## 4. Universal Pokemon Randomizer ZX (`android/randomizer-core`)
 
-1. Maintain a fork of `Ajarmar/universal-pokemon-randomizer-zx` under this
-   project's GitHub account, with our Android-compatibility changes (strip
-   the AWT-dependent GUI preview methods, trim to just the Gen4/Gen5 handlers
-   melonDS actually needs) as real commits on top of upstream's history.
-2. Pull it into this repo the same way as `android/` -- `git subtree add`
-   initially, `git subtree pull` to update -- pinned to a specific commit of
-   our fork, not tracking its `master` live.
-3. To pick up an upstream fix/feature: fetch upstream into the fork, rebase
-   our small patch commit(s) on top, retest, push, then `git subtree pull`
-   here to bring the new commit in.
+Built, not just planned: the randomizer's Java source is vendored and
+compiled directly into the app (see `android.randomizeRom()` above), not
+shelled out to as a jar, since there's no JVM on Android at all. Follows the
+same pattern as the Android port (section 2), not the tracker's pattern
+(section 3) -- this is vendored source compiled at build time, not a
+runtime-downloaded script, so a real git-based workflow applies:
+
+1. A fork, `stephen-jakiel/universal-pokemon-randomizer-zx`
+   (`android-compatibility` branch), carries our Android-compatibility
+   changes as real commits on top of `Ajarmar/universal-pokemon-randomizer-zx`'s
+   history:
+   - Deleted: `newgui/` (all Swing GUI), `ctr/` (3DS file formats, AMX/BFLIM/
+     GARCArchive/Mini/NCCH/RomfsFile/SMDH), `GFXFunctions.java`, `launcher/`,
+     `Gen6RomHandler.java`/`Gen7RomHandler.java` (3DS-only games),
+     `Abstract3DSRomHandler.java`.
+   - Stripped: every `getMascotImage()` override (Gen1-5RomHandler) and the
+     `RomHandler` interface method itself -- the only other
+     `java.awt`/`javax.swing` touch points, a Swing-only sprite preview never
+     called from the CLI entry point.
+   - **Gen1RomHandler/Gen2RomHandler/Gen3RomHandler are kept** (just their
+     `getMascotImage()` stripped), even though melonDS only emulates DS/DSi
+     and `CliRandomizer` only needs Gen4/Gen5 for that -- `Randomizer.java`
+     and `Settings.java` have `instanceof Gen1RomHandler` etc. checks deep in
+     shared logic that Gen4/Gen5 randomization itself depends on. Don't
+     delete these three; Gen6/Gen7 were safe to delete only because nothing
+     outside `CliRandomizer.java`'s own handler-list referenced them.
+   - `config/` (ROM offset `.ini` tables), `patches/` (binary `.ips` files),
+     and `newgui/Bundle.properties` (UI strings) are loaded at runtime via
+     `FileFunctions`'s `getResourceAsStream()` calls but were **never tracked
+     in upstream's git repo at all** -- they were recovered by extracting
+     them from the official release jar
+     (`gh api repos/Ajarmar/universal-pokemon-randomizer-zx/releases/latest`,
+     unzip `PokeRandoZX.jar`) into matching paths in the fork. If a future
+     `git subtree pull` ever appears to lose `config/`, `patches/`, or
+     `newgui/Bundle.properties`, re-check this -- it means upstream still
+     doesn't track them and they need re-extracting from whatever the
+     current release jar is.
+   - Verify after any change: `grep -rln "import java\.awt\|import javax\.swing" src/`
+     must return nothing, and a standalone `javac` compile of everything
+     under `src/` must succeed.
+2. Pulled into this repo at `android/randomizer-core` via `git subtree add`
+   (see commits `9906f4be`/`8de14c1b`), same mechanism as `android/` itself --
+   `git subtree pull --prefix=android/randomizer-core randomizer android-compatibility --squash`
+   to update (add the `randomizer` remote first if it's missing:
+   `git remote add randomizer https://github.com/stephen-jakiel/universal-pokemon-randomizer-zx.git`).
+3. `android/randomizer-core/build.gradle.kts` is a plain `java-library`
+   module (not `com.android.library`) -- deliberately so, since compiling
+   against a real JDK rather than Android's stripped `android.jar` is what
+   lets the fork's source compile unmodified outside the handful of actual
+   AWT/Swing call sites already removed on the fork side. Its `sourceSets`
+   point straight at the subtree's own `src/com/dabomstew/...` layout rather
+   than moving files to Gradle's usual `src/main/java/...` convention, to
+   keep the directory a clean 1:1 mirror of the fork for future subtree
+   pulls.
+4. The Lua binding is `android.randomizeRom(settingsPath, inputRomPath,
+   outputRomPath)` (`LuaScriptManager.h`/`.cpp`'s `RandomizeRom` FormsOp,
+   dispatched in `LuaFormsOverlayUi.kt`), which calls
+   `com.dabomstew.pkrandom.cli.CliRandomizer.invoke(String[])` in-process on
+   a background thread with synthesized CLI-style args
+   (`-s <settings> -i <input> -o <output> -l`), the same public entry point
+   the jar's own `java -jar ... cli ...` invocation would have used.
+5. To pick up an upstream fix/feature: fetch upstream into the fork, rebase
+   our patch commits on top, retest (`grep`/`javac` checks above, then
+   `./gradlew assembleGitHubProdDebug`), push, then `git subtree pull` here.
 
 Expect this to be low-frequency maintenance: the Gen4/Gen5 randomization
 logic is mature, and most upstream activity is new-game support (Gen8/9)

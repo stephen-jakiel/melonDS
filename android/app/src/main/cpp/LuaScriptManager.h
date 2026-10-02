@@ -84,6 +84,15 @@ enum class FormsOp
     // Android (see l_os_execute_stub's comment). Kotlin defers these to a
     // background (IO dispatcher) coroutine before answering.
     HttpGet, DownloadAndExtractUpdate, OpenUrl,
+    // Same reasoning as the above, for QuickLoader.lua's "Generate ROMs"
+    // quickload mode: the real implementation shells out to `java -jar
+    // <randomizer>.jar cli ...`, which can't work on Android either (no
+    // JVM/java binary at all, a harder wall than os.execute() -- see
+    // android.randomizeRom()'s own comment). Kotlin calls the Universal
+    // Pokemon Randomizer's CliRandomizer directly in-process instead (it's
+    // compiled into this app as the :randomizer-core module), on a
+    // background thread since randomization is CPU-heavy, not just I/O.
+    RandomizeRom,
 };
 
 struct FormsRequest
@@ -359,6 +368,7 @@ private:
     static int l_android_openurl(lua_State* L);
     static int l_android_consumenewrunrequested(lua_State* L);
     static int l_android_setoverlayscrollenabled(lua_State* L);
+    static int l_android_randomizerom(lua_State* L);
 
     melonDS::NDS* nds;
     const uint32_t* inputMask;

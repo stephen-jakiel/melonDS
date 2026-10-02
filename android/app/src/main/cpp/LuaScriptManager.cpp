@@ -583,6 +583,7 @@ void LuaScriptManager::registerAPI()
         {"openUrl", l_android_openurl},
         {"consumeNewRunRequested", l_android_consumenewrunrequested},
         {"setOverlayScrollEnabled", l_android_setoverlayscrollenabled},
+        {"randomizeRom", l_android_randomizerom},
         {nullptr, nullptr}
     };
     luaL_newlib(L, androidFuncs);
@@ -1721,6 +1722,21 @@ int LuaScriptManager::l_android_setoverlayscrollenabled(lua_State* L)
     bool enabled = lua_toboolean(L, 1);
     mgr->overlayScrollEnabled.store(enabled);
     return 0;
+}
+
+int LuaScriptManager::l_android_randomizerom(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::RandomizeRom;
+    req.items = {
+        luaL_checkstring(L, 1), // settings (.rnqs) path
+        luaL_checkstring(L, 2), // input ROM path
+        luaL_checkstring(L, 3), // output ROM path
+    };
+    FormsResult res = mgr->callFormsBridge(req);
+    lua_pushboolean(L, res.boolResult);
+    return 1;
 }
 
 }
