@@ -70,6 +70,7 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
     }
 
     var openFileRequest by remember { mutableStateOf<OpenFileRequest?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         LuaFormsManager.reset()
@@ -131,6 +132,18 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
                                 }
                                 MelonEmulator.deliverLuaFormsResult(0, "", success)
                             }
+                        }
+                        LuaFormsRequest.OP_OPEN_URL -> {
+                            val success = try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(req.text))
+                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(intent)
+                                true
+                            } catch (e: Exception) {
+                                android.util.Log.e("LuaFormsOverlay", "android.openUrl(${req.text}) failed", e)
+                                false
+                            }
+                            MelonEmulator.deliverLuaFormsResult(0, "", success)
                         }
                         else -> {
                             val result = try {

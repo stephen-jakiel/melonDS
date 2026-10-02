@@ -580,6 +580,7 @@ void LuaScriptManager::registerAPI()
         {"getScriptDirectory", l_android_getscriptdirectory},
         {"httpGet", l_android_httpget},
         {"downloadAndExtractUpdate", l_android_downloadandextractupdate},
+        {"openUrl", l_android_openurl},
         {nullptr, nullptr}
     };
     luaL_newlib(L, androidFuncs);
@@ -1646,6 +1647,17 @@ int LuaScriptManager::l_android_downloadandextractupdate(lua_State* L)
     req.op = FormsOp::DownloadAndExtractUpdate;
     req.text = luaL_checkstring(L, 1);  // URL
     req.text2 = luaL_checkstring(L, 2); // destination directory
+    FormsResult res = mgr->callFormsBridge(req);
+    lua_pushboolean(L, res.boolResult);
+    return 1;
+}
+
+int LuaScriptManager::l_android_openurl(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    FormsRequest req;
+    req.op = FormsOp::OpenUrl;
+    req.text = luaL_checkstring(L, 1);
     FormsResult res = mgr->callFormsBridge(req);
     lua_pushboolean(L, res.boolResult);
     return 1;

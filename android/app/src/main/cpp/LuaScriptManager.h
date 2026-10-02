@@ -83,7 +83,7 @@ enum class FormsOp
     // since the real os.execute()-based update mechanism can't work on
     // Android (see l_os_execute_stub's comment). Kotlin defers these to a
     // background (IO dispatcher) coroutine before answering.
-    HttpGet, DownloadAndExtractUpdate,
+    HttpGet, DownloadAndExtractUpdate, OpenUrl,
 };
 
 struct FormsRequest
@@ -337,6 +337,7 @@ private:
     static int l_android_getscriptdirectory(lua_State* L);
     static int l_android_httpget(lua_State* L);
     static int l_android_downloadandextractupdate(lua_State* L);
+    static int l_android_openurl(lua_State* L);
 
     melonDS::NDS* nds;
     const uint32_t* inputMask;

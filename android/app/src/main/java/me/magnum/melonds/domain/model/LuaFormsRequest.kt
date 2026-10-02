@@ -59,6 +59,7 @@ data class LuaFormsRequest(
         // LuaScriptManager.h's FormsOp enum comment for why these exist.
         const val OP_HTTP_GET = 24
         const val OP_DOWNLOAD_EXTRACT_UPDATE = 25
+        const val OP_OPEN_URL = 26
     }
 
     override fun equals(other: Any?): Boolean {
