@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
@@ -162,6 +163,24 @@ fun LuaOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
         ) {
             Icon(
                 imageVector = if (expanded) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
+        // This tracker's own "start a new run" trigger is normally a
+        // simultaneous Start+Select+A+B hold on the real controller (see
+        // Main.lua's patched checkForNextSeedCombo()), impractical on a
+        // touchscreen -- this icon fires the same trigger directly via the
+        // android.consumeNewRunRequested() bridge instead of the real NDS
+        // input, so it can't have any side effect on the running game.
+        IconButton(
+            onClick = { MelonEmulator.requestLuaNewRun() },
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 76.dp, top = 4.dp).size(32.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
                 contentDescription = null,
                 tint = Color.White,
                 modifier = Modifier.size(20.dp),

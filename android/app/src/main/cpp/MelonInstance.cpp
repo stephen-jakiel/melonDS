@@ -731,6 +731,11 @@ void MelonInstance::setLuaMousePosition(float x, float y, bool pressed)
     luaScriptManager->setMousePosition(x, y, pressed);
 }
 
+void MelonInstance::requestLuaNewRun()
+{
+    luaScriptManager->requestNewRun();
+}
+
 void MelonInstance::updateRenderer()
 {
     Renderer newRenderer = currentConfiguration->renderer;

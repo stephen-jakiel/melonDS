@@ -581,6 +581,7 @@ void LuaScriptManager::registerAPI()
         {"httpGet", l_android_httpget},
         {"downloadAndExtractUpdate", l_android_downloadandextractupdate},
         {"openUrl", l_android_openurl},
+        {"consumeNewRunRequested", l_android_consumenewrunrequested},
         {nullptr, nullptr}
     };
     luaL_newlib(L, androidFuncs);
@@ -1666,6 +1667,14 @@ int LuaScriptManager::l_android_openurl(lua_State* L)
     req.text = luaL_checkstring(L, 1);
     FormsResult res = mgr->callFormsBridge(req);
     lua_pushboolean(L, res.boolResult);
+    return 1;
+}
+
+int LuaScriptManager::l_android_consumenewrunrequested(lua_State* L)
+{
+    LuaScriptManager* mgr = self(L);
+    bool wasRequested = mgr->newRunRequested.exchange(false);
+    lua_pushboolean(L, wasRequested);
     return 1;
 }
 

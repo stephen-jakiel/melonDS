@@ -605,6 +605,12 @@ Java_me_magnum_melonds_MelonEmulator_setLuaMousePosition(JNIEnv* env, jobject th
     MelonDSAndroid::setLuaMousePosition(x, y, pressed);
 }
 
+JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_requestLuaNewRun(JNIEnv* env, jobject thiz)
+{
+    MelonDSAndroid::requestLuaNewRun();
+}
+
 JNIEXPORT jintArray JNICALL
 Java_me_magnum_melonds_MelonEmulator_getLuaScreenPadding(JNIEnv* env, jobject thiz)
 {

@@ -162,4 +162,6 @@ object MelonEmulator {
     external fun getLuaScreenPadding(): IntArray
 
     external fun setLuaMousePosition(x: Float, y: Float, pressed: Boolean)
+
+    external fun requestLuaNewRun()
 }

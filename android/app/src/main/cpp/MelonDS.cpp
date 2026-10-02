@@ -453,6 +453,12 @@ namespace MelonDSAndroid
             instance->setLuaMousePosition(x, y, pressed);
     }
 
+    void requestLuaNewRun()
+    {
+        if (instance)
+            instance->requestLuaNewRun();
+    }
+
     bool setupOpenGlContext()
     {
         if (openGlContext == nullptr)

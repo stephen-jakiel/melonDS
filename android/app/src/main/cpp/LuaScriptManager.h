@@ -202,6 +202,15 @@ public:
         mousePressed.store(pressed);
     }
 
+    // Called from Kotlin when the user taps the overlay's "new run" icon --
+    // this tracker's own "start a new run" trigger is normally a
+    // simultaneous Start+Select+A+B hold on the real controller (see
+    // checkForNextSeedCombo() in the patched Main.lua), impractical on a
+    // touchscreen. Consumed (test-and-clear) via android.consumeNewRunRequested()
+    // rather than driving the real NDS input mask, so this can't have any
+    // side effect on the actual running game.
+    void requestNewRun() { newRunRequested.store(true); }
+
 private:
     void threadMain(std::string scriptPath);
     void registerAPI();
@@ -338,6 +347,7 @@ private:
     static int l_android_httpget(lua_State* L);
     static int l_android_downloadandextractupdate(lua_State* L);
     static int l_android_openurl(lua_State* L);
+    static int l_android_consumenewrunrequested(lua_State* L);
 
     melonDS::NDS* nds;
     const uint32_t* inputMask;
@@ -401,6 +411,10 @@ private:
     std::atomic<float> mouseX {0};
     std::atomic<float> mouseY {0};
     std::atomic<bool> mousePressed {false};
+
+    // Set via requestNewRun() (Kotlin, on the overlay's "new run" icon tap),
+    // test-and-cleared by l_android_consumenewrunrequested().
+    std::atomic<bool> newRunRequested {false};
 };
 
 }
