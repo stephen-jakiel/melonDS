@@ -68,28 +68,48 @@ fun LuaFormsOverlayUi(isScriptRunning: Boolean, modifier: Modifier = Modifier) {
     androidx.compose.runtime.LaunchedEffect(Unit) {
         LuaFormsManager.reset()
         while (isActive) {
-            for (cmd in MelonEmulator.takeLuaFormsCommands()) {
-                LuaFormsManager.processCommand(cmd)
+            try {
+                for (cmd in MelonEmulator.takeLuaFormsCommands()) {
+                    LuaFormsManager.processCommand(cmd)
+                }
+            } catch (e: Exception) {
+                // A mutation/drawing command is fire-and-forget -- nothing
+                // is waiting on it, so just log and keep the loop alive.
+                android.util.Log.e("LuaFormsOverlay", "Error processing a forms command", e)
             }
 
-            val req = MelonEmulator.pollLuaFormsRequest()
-            if (req != null) {
-                if (req.op == LuaFormsRequest.OP_OPEN_FILE) {
-                    openFileRequest = OpenFileRequest(
-                        initialDir = req.text,
-                        onPicked = { path ->
-                            MelonEmulator.deliverLuaFormsResult(0, path, false)
-                            openFileRequest = null
-                        },
-                        onCancel = {
-                            MelonEmulator.deliverLuaFormsResult(0, "", false)
-                            openFileRequest = null
-                        },
-                    )
-                } else {
-                    val result = LuaFormsManager.processRequest(req)
-                    MelonEmulator.deliverLuaFormsResult(result.intResult, result.stringResult, result.boolResult)
+            // A blocking request MUST always get a response, even if
+            // processing it throws -- the script thread is parked in
+            // sem_wait() for exactly this, and an uncaught exception here
+            // would otherwise hang it forever (the whole script dead in
+            // the water) instead of just this one call misbehaving.
+            try {
+                val req = MelonEmulator.pollLuaFormsRequest()
+                if (req != null) {
+                    if (req.op == LuaFormsRequest.OP_OPEN_FILE) {
+                        openFileRequest = OpenFileRequest(
+                            initialDir = req.text,
+                            onPicked = { path ->
+                                MelonEmulator.deliverLuaFormsResult(0, path, false)
+                                openFileRequest = null
+                            },
+                            onCancel = {
+                                MelonEmulator.deliverLuaFormsResult(0, "", false)
+                                openFileRequest = null
+                            },
+                        )
+                    } else {
+                        val result = try {
+                            LuaFormsManager.processRequest(req)
+                        } catch (e: Exception) {
+                            android.util.Log.e("LuaFormsOverlay", "Error processing forms request op=${req.op} handle=${req.handle}", e)
+                            LuaFormsResultData()
+                        }
+                        MelonEmulator.deliverLuaFormsResult(result.intResult, result.stringResult, result.boolResult)
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("LuaFormsOverlay", "Error polling for a forms request", e)
             }
 
             delay(POLL_INTERVAL_MS)
